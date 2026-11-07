@@ -10,25 +10,23 @@ from .core import (InputError, Pending, atomic_write, compile_dictionary, config
                    fingerprint, initialize, load_config, read_status, read_words, sync, watch, xdg)
 
 
-def service(config: Path, action: str) -> None:
-    unit = xdg('XDG_CONFIG_HOME', '.config') / 'systemd/user/ginput-watch.service'
-    if action == 'disable':
-        subprocess.run(['systemctl', '--user', 'disable', '--now', unit.name], check=True)
-        return
+def service_unit(root: Path, config: Path) -> str:
     # Invoke the package via its module directory. Quote systemd's own syntax,
     # including percent specifiers and dollar environment expansions.
     def quote(value):
         return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%').replace('$', '$$') + '"'
-    root = Path(__file__).resolve().parents[1]
+    if any(c in str(root) + str(config) + sys.executable for c in '\n\r'):
+        raise InputError('服务路径不能包含换行符。')
     command = ' '.join([quote(sys.executable), '-m', 'ginput', '--config', quote(config), 'watch'])
-    text = f'''[Unit]
+    # WorkingDirectory takes a literal path, not ExecStart's quoted argv syntax.
+    return f'''[Unit]
 Description=Guitar Input local dictionary watcher
 After=graphical-session.target
 PartOf=graphical-session.target
 
 [Service]
 Type=simple
-WorkingDirectory={quote(root)}
+WorkingDirectory={str(root).replace('%', '%%')}
 ExecStart={command}
 Restart=on-failure
 RestartSec=5
@@ -37,6 +35,14 @@ UMask=0077
 [Install]
 WantedBy=default.target
 '''
+
+
+def service(config: Path, action: str) -> None:
+    unit = xdg('XDG_CONFIG_HOME', '.config') / 'systemd/user/ginput-watch.service'
+    if action == 'disable':
+        subprocess.run(['systemctl', '--user', 'disable', '--now', unit.name], check=True)
+        return
+    text = service_unit(Path(__file__).resolve().parents[1], config)
     atomic_write(unit, text.encode())
     subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
     subprocess.run(['systemctl', '--user', 'enable', '--now', unit.name], check=True)
