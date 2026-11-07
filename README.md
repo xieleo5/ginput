@@ -4,6 +4,22 @@ Guitar Input（ginput）是一个支持本地自定义词库的 Linux 中文输�
 
 第一版基于 **Rime 拼音引擎 + Fcitx 4 桌面接入**，自行管理输入方案与个人词库。支持简体全拼、拼音首字母简拼、Rime 的本地选词学习，以及「编辑本地文件 → 自动编译 → 更新词库」。通用汉字和基础词语来自系统的 `pinyin_simp`，个人词库在此基础上扩充。
 
+## 拼写支持（0.2.0）
+
+| 输入方式 | 输入示例 | 可选结果 |
+| --- | --- | --- |
+| 首字母简拼 | `nh`、`zg` | 你好、中国 |
+| 双字母声母 | `zhg` | 中国 |
+| 简拼与全拼混用 | `nih`、`nhao` | 你好 |
+| 个人词条简拼 | `slsrf`、`slshrf` | 示例输入法 |
+| 常见音节内换序 | `nihoa`、`zhognguo`、`beijign` | 你好、中国、北京 |
+| 常见音节内换序 | `shagnhai`、`tainkong` | 上海、天空 |
+| 同排邻键误按 | `nihso`、`nihap` | 你好 |
+
+这些示例通过实际 Rime 选词上屏测试，确认会消化完整输入。简拼存在重码，例如 `zg` 也可表示“这个”，不保证目标词永远第一。当前容错是有限规则与 Rime 的邻键搜索；**不保证任意错别字、漏字母、多字母或跨音节乱序**。
+
+换序规则保留原始拼音，新增候选可能改变次要候选的排序。单独的 `n`/`m` 用于简拼，不作为“嗯/呣”的特殊全拼。按个人习惯选词后的排序仍由 Rime 学习。
+
 目前是可测试的输入方案和词库管理工具，尚无独立候选框、图形词库编辑器或 SSF 导入器。桌面重载适配器目前只支持 Fcitx 4；Fcitx 5、自定义候选框和皮肤是后续工作。不会自动卸载或切换搜狗，也不承诺搜狗的云词库与预测能力。
 
 ## 本机词库
@@ -86,7 +102,7 @@ python3 -m ginput service disable
 python3 -m unittest discover -s tests -v
 ```
 
-普通单元测试覆盖错误词库、并发更新、回退、输入中等待和学习数据保护。安装 `librime-bin librime-dev rime-data-pinyin-simp rime-prelude` 和 C 编译器后，还会运行真正的 Rime 集成测试：输入 `nihao`、查询自定义词，并修改文件验证监视器自动编译后的新候选。可设置 `GINPUT_REQUIRE_RIME=1`，让缺少依赖直接失败而不是跳过。
+普通单元测试覆盖错误词库、并发更新、回退、输入中等待和学习数据保护。安装 `librime-bin librime-dev rime-data-pinyin-simp rime-prelude` 和 C 编译器后，还会运行真正的 Rime 集成测试：全拼、简拼、常见换序、邻键误按、完整上屏及正常拼音排序，并修改文件验证监视器自动编译后的新候选。可设置 `GINPUT_REQUIRE_RIME=1`，让缺少依赖直接失败而不是跳过。
 
 集成测试只在临时目录运行，不连接桌面、不改真实用户词库。自定义测试运行库可通过 `RIME_DEPLOYER`、`RIME_SHARED_DATA`、`RIME_INCLUDE_DIR`、`RIME_LIBRARY_DIR` 指定。
 
@@ -99,4 +115,4 @@ python3 -m unittest discover -s tests -v
 - 自定义皮肤在本机导入；仓库仅包含通用配置与代码，不包含个人素材。
 - Fcitx 5 接入、部署完成反馈、打包安装及更细致的空闲检测。
 
-项目依赖的设计依据：[Rime 输入方案文档](https://github.com/rime/home/wiki/RimeWithSchemata)、[Fcitx Rime](https://github.com/fcitx/fcitx-rime)、[基础简体拼音词库](https://github.com/rime/rime-pinyin-simp)。运行库和基础词库由系统包提供，各自遵循上游许可。
+项目依赖的设计依据：[Rime 输入方案文档](https://github.com/rime/home/wiki/RimeWithSchemata)、[拼写运算与常见换序规则](https://github.com/rime/home/wiki/SpellingAlgebra)、[Rime 邻键纠错实现](https://github.com/rime/librime/blob/1.7.3/src/rime/dict/corrector.cc)、[Fcitx Rime](https://github.com/fcitx/fcitx-rime)、[基础简体拼音词库](https://github.com/rime/rime-pinyin-simp)。运行库和基础词库由系统包提供，各自遵循上游许可。

@@ -53,11 +53,56 @@ class RimeIntegration(unittest.TestCase):
         output = subprocess.check_output([str(self.probe), str(SHARED), self.config['rime_dir'], keys], text=True)
         return output.splitlines()
 
+    def assert_commits(self, keys, expected):
+        result = subprocess.run([str(self.probe), str(SHARED), self.config['rime_dir'], keys,
+                                 '--commit', expected], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, f'{keys}: {result.stdout} {result.stderr}')
+        self.assertEqual(result.stdout.strip(), expected)
+
     def test_base_pinyin_and_personal_word(self):
         result = core.sync(self.config)
         self.assertEqual(result['status'], 'published')
         self.assertIn('你好', self.candidates('nihao'))
         self.assertIn('示例输入法', self.candidates('shilishurufa'))
+
+    def test_initials_and_mixed_full_spelling_commit_all_input(self):
+        core.sync(self.config)
+        for keys, expected in [('nh', '你好'), ('nih', '你好'), ('nhao', '你好'),
+                               ('zg', '中国'), ('zhg', '中国'), ('slsrf', '示例输入法'),
+                               ('slshrf', '示例输入法'), ('shilisrf', '示例输入法')]:
+            with self.subTest(keys=keys):
+                self.assert_commits(keys, expected)
+
+    def test_common_transpositions_commit_all_input(self):
+        core.sync(self.config)
+        for keys, expected in [('nihoa', '你好'), ('zhognguo', '中国'), ('beijign', '北京'),
+                               ('shagnhai', '上海'), ('tainkong', '天空')]:
+            with self.subTest(keys=keys):
+                self.assertIn(expected, self.candidates(keys)[:5])
+                self.assert_commits(keys, expected)
+
+    def test_keyboard_neighbor_mistakes_commit_all_input(self):
+        core.sync(self.config)
+        for keys in ('nihso', 'nihap'):
+            with self.subTest(keys=keys):
+                self.assertIn('你好', self.candidates(keys)[:5])
+                self.assert_commits(keys, '你好')
+
+    def test_correct_full_spelling_stays_first(self):
+        core.sync(self.config)
+        # No selection/learning before querying these: test fresh dictionary ranks.
+        for keys, expected in [('nihao', '你好'), ('zhongguo', '中国'), ('beijing', '北京'),
+                               ('shanghai', '上海'), ('shurufa', '输入法'), ('gongzuo', '工作'),
+                               ('gaoxing', '高兴'), ('shilishurufa', '示例输入法')]:
+            with self.subTest(keys=keys):
+                self.assertEqual(self.candidates(keys)[0], expected)
+
+    def test_partial_candidate_does_not_count_as_typo_correction(self):
+        core.sync(self.config)
+        # A visible 你好 matching only a prefix must not silently eat the final q.
+        result = subprocess.run([str(self.probe), str(SHARED), self.config['rime_dir'],
+                                 'nihaoq', '--commit', '你好'], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 6, result.stdout + result.stderr)
 
     def test_recompile_adds_new_word_and_removes_old_static_word(self):
         core.sync(self.config)

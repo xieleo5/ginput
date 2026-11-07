@@ -1,9 +1,9 @@
 schema:
   schema_id: ginput
   name: Guitar Input · 拼音
-  version: '0.1.0'
+  version: '0.2.0'
   author: [Guitar]
-  description: 本地个人词库、简体全拼及输入习惯学习。
+  description: 本地个人词库、全拼简拼、常见换序与邻键容错、输入习惯学习。
 switches:
   - name: ascii_mode
     reset: 0
@@ -27,15 +27,23 @@ speller:
   alphabet: abcdefghijklmnopqrstuvwxyz
   delimiter: " '"
   algebra:
+    # Syllabic n/m otherwise take precedence over initials in nhao, etc.
+    - erase/^(hm|m|n|ng)$/
     - abbrev/^([a-z]).+$/$1/
     - abbrev/^([zcs]h).+$/$1/
     - derive/^([nl])ue$/$1ve/
+    # Common swaps within a syllable; keep every original spelling.
+    - derive/([aeiou])ng$/$1gn/
+    - derive/ao$/oa/
+    - derive/([iu])a(o|ng?)$/a$1$2/
 translator:
   dictionary: ginput
   user_dict: ginput
   enable_user_dict: true
   enable_sentence: true
   enable_completion: true
+  # Rime's bounded keyboard-neighbor search, not arbitrary reordering.
+  enable_correction: true
   preedit_format:
     - xform/([nl])v/$1ü/
 menu:
