@@ -1,89 +1,87 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later
- * Exercise keyboard events against a small Fcitx API fixture, without a desktop.
+ * Candidate-page fixture: verifies that the grid selects the engine's true index.
  */
+#define _GNU_SOURCE
 #include <assert.h>
 #include "../native/panel.c"
-
 static FcitxIM current = {.uniqueName = "rime"};
-static FcitxCandidateWord words[5];
-static int count = 5, chosen = -1;
-static FcitxCandidateLayoutHint hint;
-static FcitxKeyFilterHook press_hook, release_hook;
-static FcitxIMEventHook update_hook, reset_hook, unfocus_hook, off_hook, changed_hook;
-
-FcitxIM *FcitxInstanceGetCurrentIM(FcitxInstance *instance) {
-    (void)instance; return &current;
+static FcitxCandidateWord engine_words[5];
+static char labels[47][16];
+static int total = 47, engine_page, chosen = -1;
+static fd_set fds;
+static FcitxUI ui;
+static FcitxAddon addon = {.ui = &ui};
+FcitxIM *FcitxInstanceGetCurrentIM(FcitxInstance *i) { (void)i; return &current; }
+FcitxInputState *FcitxInstanceGetInputState(FcitxInstance *i) { (void)i; return NULL; }
+FcitxInputContext *FcitxInstanceGetCurrentIC(FcitxInstance *i) { (void)i; return (FcitxInputContext *)&current; }
+FcitxCandidateWordList *FcitxInputStateGetCandidateList(FcitxInputState *i) { (void)i; return NULL; }
+FcitxMessages *FcitxInputStateGetPreedit(FcitxInputState *i) { (void)i; return NULL; }
+char *FcitxUIMessagesToCString(FcitxMessages *m) { (void)m; return strdup("ni hao"); }
+int FcitxCandidateWordGetCurrentWindowSize(FcitxCandidateWordList *l) { (void)l; int n=total-engine_page*5; return n<5?n:5; }
+int FcitxCandidateWordGetListSize(FcitxCandidateWordList *l) { return FcitxCandidateWordGetCurrentWindowSize(l); }
+boolean FcitxCandidateWordHasPrev(FcitxCandidateWordList *l) { (void)l; return engine_page>0; }
+boolean FcitxCandidateWordHasNext(FcitxCandidateWordList *l) { (void)l; return (engine_page+1)*5<total; }
+boolean FcitxCandidateWordGoPrevPage(FcitxCandidateWordList *l) { if (!FcitxCandidateWordHasPrev(l)) return false; --engine_page; return true; }
+boolean FcitxCandidateWordGoNextPage(FcitxCandidateWordList *l) { if (!FcitxCandidateWordHasNext(l)) return false; ++engine_page; return true; }
+FcitxCandidateWord *FcitxCandidateWordGetByIndex(FcitxCandidateWordList *l, int index) {
+    (void)l; engine_words[index].strWord=labels[engine_page*5+index];
+    engine_words[index].wordType=index==0?MSG_CANDIATE_CURSOR:MSG_OTHER;
+    return &engine_words[index];
 }
-FcitxInputState *FcitxInstanceGetInputState(FcitxInstance *instance) {
-    (void)instance; return NULL;
-}
-FcitxCandidateWordList *FcitxInputStateGetCandidateList(FcitxInputState *input) {
-    (void)input; return NULL;
-}
-int FcitxCandidateWordGetListSize(FcitxCandidateWordList *list) {
-    (void)list; return count;
-}
-int FcitxCandidateWordGetCurrentWindowSize(FcitxCandidateWordList *list) {
-    (void)list; return count;
-}
-void FcitxCandidateWordSetLayoutHint(FcitxCandidateWordList *list, FcitxCandidateLayoutHint value) {
-    (void)list; hint = value;
-}
-FcitxCandidateWord *FcitxCandidateWordGetByIndex(FcitxCandidateWordList *list, int index) {
-    (void)list; return &words[index];
-}
-INPUT_RETURN_VALUE FcitxCandidateWordChooseByIndex(FcitxCandidateWordList *list, int index) {
-    (void)list; chosen = index; return IRV_DISPLAY_CANDWORDS;
-}
-#define REGISTER(name, type, slot) \
-    void name(FcitxInstance *instance, type hook) { (void)instance; slot = hook; }
-REGISTER(FcitxInstanceRegisterPreInputFilter, FcitxKeyFilterHook, press_hook)
-REGISTER(FcitxInstanceRegisterPostReleaseInputFilter, FcitxKeyFilterHook, release_hook)
-REGISTER(FcitxInstanceRegisterUpdateCandidateWordHook, FcitxIMEventHook, update_hook)
-REGISTER(FcitxInstanceRegisterResetInputHook, FcitxIMEventHook, reset_hook)
-REGISTER(FcitxInstanceRegisterInputUnFocusHook, FcitxIMEventHook, unfocus_hook)
-REGISTER(FcitxInstanceRegisterTriggerOffHook, FcitxIMEventHook, off_hook)
-REGISTER(FcitxInstanceRegisterIMChangedHook, FcitxIMEventHook, changed_hook)
-
-static boolean press(FcitxKeySym key, unsigned int state, INPUT_RETURN_VALUE *result) {
-    *result = IRV_TO_PROCESS;
-    return press_hook.func(press_hook.arg, key, state, result);
+INPUT_RETURN_VALUE FcitxCandidateWordChooseByIndex(FcitxCandidateWordList *l, int index) { (void)l; chosen=engine_page*5+index; return IRV_DISPLAY_CANDWORDS; }
+void FcitxInstanceGetWindowRect(FcitxInstance *i, FcitxInputContext *c, int *x,int *y,int *w,int *h) { (void)i;(void)c;*x=*y=*w=*h=0; }
+FcitxAddon *FcitxInstanceGetCurrentUI(FcitxInstance *i) { (void)i;return &addon; }
+void FcitxUIUpdateInputWindow(FcitxInstance *i) { (void)i; }
+INPUT_RETURN_VALUE FcitxInstanceDoInputCallback(FcitxInstance *i, INPUT_RETURN_VALUE r, FcitxKeyEventType e, unsigned long t, FcitxKeySym s, unsigned int st) { (void)i;(void)e;(void)t;(void)s;(void)st;return r; }
+fd_set *FcitxInstanceGetReadFDSet(FcitxInstance *i) { (void)i; return &fds; }
+int FcitxInstanceGetMaxFD(FcitxInstance *i) { (void)i;return 0; }
+void FcitxInstanceSetMaxFD(FcitxInstance *i,int n) { (void)i;(void)n; }
+uint64_t FcitxInstanceAddTimeout(FcitxInstance *i,long ms,FcitxTimeoutCallback cb,void *a) { (void)i;(void)ms;(void)cb;(void)a;return 0; }
+#define REGISTER(name,type) void name(FcitxInstance *i,type h) {(void)i;(void)h;}
+REGISTER(FcitxInstanceRegisterPreInputFilter,FcitxKeyFilterHook)
+REGISTER(FcitxInstanceRegisterPreReleaseInputFilter,FcitxKeyFilterHook)
+REGISTER(FcitxInstanceRegisterUpdateCandidateWordHook,FcitxIMEventHook)
+REGISTER(FcitxInstanceRegisterResetInputHook,FcitxIMEventHook)
+REGISTER(FcitxInstanceRegisterInputUnFocusHook,FcitxIMEventHook)
+REGISTER(FcitxInstanceRegisterTriggerOffHook,FcitxIMEventHook)
+REGISTER(FcitxInstanceRegisterIMChangedHook,FcitxIMEventHook)
+static void press(Panel *p,FcitxKeySym key) {
+    INPUT_RETURN_VALUE result=IRV_TO_PROCESS;
+    assert(key_filter(p,key,0,&result));
+    /* Handled releases must never reset the grid selection in the engine. */
+    assert(release_filter(p,key,0,&result));
 }
 int main(void) {
-    Panel *panel = create(NULL);
-    INPUT_RETURN_VALUE result;
-    assert(panel);
-    update_hook.func(update_hook.arg);
-    assert(hint == CLH_Horizontal);
-    assert(press(FcitxKey_Down, 0, &result));
-    assert(hint == CLH_Vertical && result == IRV_DISPLAY_MESSAGE);
-
-    /* Regression: Rime directly rebuilds its candidates on key release. */
-    hint = CLH_NotSet;
-    result = IRV_TO_PROCESS;
-    assert(!release_hook.func(release_hook.arg, FcitxKey_Down, 0, &result));
-    assert(hint == CLH_Vertical && result == IRV_TO_PROCESS);
-    assert(!press(FcitxKey_Down, 0, &result)); /* Engine moves highlight. */
-    assert(!press(FcitxKey_Up, 0, &result));
-    words[1].wordType = MSG_CANDIATE_CURSOR;
-    assert(press(FcitxKey_Return, 0, &result));
-    assert(chosen == 1 && result == IRV_DISPLAY_CANDWORDS);
-    assert(press(FcitxKey_Escape, 0, &result));
-    assert(hint == CLH_Horizontal && count == 5 && result == IRV_DISPLAY_MESSAGE);
-    assert(!press(FcitxKey_Return, 0, &result));
-    assert(!press(FcitxKey_Down, FcitxKeyState_Ctrl, &result));
-
-    FcitxIMEventHook resets[] = {reset_hook, unfocus_hook, off_hook, changed_hook};
-    for (unsigned int i = 0; i < sizeof(resets)/sizeof(resets[0]); ++i) {
-        assert(press(FcitxKey_Down, 0, &result));
-        resets[i].func(resets[i].arg);
-        assert(!panel->expanded);
-    }
-    count = 0;
-    assert(!press(FcitxKey_Down, 0, &result));
-    count = 5;
-    current.uniqueName = "another-input-method";
-    assert(!press(FcitxKey_Down, 0, &result));
-    free(panel);
+    for (int i=0;i<47;++i) snprintf(labels[i],sizeof(labels[i]),"word%02d",i);
+    int pair[2]; assert(!socketpair(AF_UNIX,SOCK_SEQPACKET,0,pair));
+    Panel p={.fd=pair[0],.ready=true,.dirty=true}; active_panel=&p;
+    press(&p,FcitxKey_Down);
+    assert(p.expanded && p.count==20 && p.pages==4 && engine_page==0);
+    assert(!strcmp(p.words[19].text,"word19"));
+    press(&p,FcitxKey_Down); assert(p.selected==5);
+    press(&p,FcitxKey_Right); assert(p.selected==6);
+    press(&p,FcitxKey_Return); assert(chosen==6 && !p.expanded);
+    engine_page=0; press(&p,FcitxKey_Down);
+    press(&p,FcitxKey_Page_Down); assert(engine_page==4 && !strcmp(p.words[0].text,"word20"));
+    press(&p,FcitxKey_Page_Down); assert(engine_page==8 && p.count==7 && !p.next);
+    press(&p,FcitxKey_Page_Up); assert(engine_page==4 && p.count==20);
+    press(&p,FcitxKey_Page_Up); assert(engine_page==0);
+    press(&p,FcitxKey_Down); press(&p,FcitxKey_3); assert(chosen==7);
+    engine_page=0; press(&p,FcitxKey_Down); press(&p,FcitxKey_Escape);
+    assert(!p.expanded && total==47 && engine_page==0);
+    INPUT_RETURN_VALUE result=IRV_TO_PROCESS;
+    assert(!key_filter(&p,FcitxKey_Down,FcitxKeyState_Ctrl,&result));
+    total=0; assert(!key_filter(&p,FcitxKey_Down,0,&result)); total=47;
+    current.uniqueName="another-input-method";
+    assert(!key_filter(&p,FcitxKey_Down,0,&result)); current.uniqueName="rime";
+    press(&p,FcitxKey_Down); reset(&p); assert(!p.expanded);
+    /* Stale mouse messages cannot commit words after another frame or reset. */
+    collect(&p); p.serial=4; p.dirty=false; chosen=-1;
+    assert(send(pair[1],"select 3 2",10,0)==10); process_event(&p); assert(chosen==-1);
+    p.dirty=true; assert(send(pair[1],"select 4 2",10,0)==10); process_event(&p); assert(chosen==-1);
+    p.dirty=false; assert(send(pair[1],"select 4 2",10,0)==10); process_event(&p); assert(chosen==2);
+    close(pair[1]); process_event(&p); assert(p.fd==-1 && !p.ready && !p.expanded);
+    clear_words(&p);
+    if (addon.ui==&p.wrapped) addon.ui=p.original;
     return 0;
 }

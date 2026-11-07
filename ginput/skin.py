@@ -11,13 +11,18 @@ SKIN_NAME = 'ginput-custom'
 
 
 def build(output: Path, artwork: Path | None = None,
-          crop: tuple[int, int, int, int] | None = None, height: int = 140) -> None:
+          crop: tuple[int, int, int, int] | None = None, height: int = 180,
+          accent_crop: tuple[int, int, int, int] | None = None, opacity: float = .22) -> None:
     try:
         import cairo
     except ImportError as exc:
         raise InputError('皮肤渲染需要 python3-cairo。') from exc
     if output.exists() and any(output.iterdir()):
         raise InputError('皮肤输出目录必须为空。')
+    if not 0 <= opacity <= 1:
+        raise InputError('背景不透明度须为 0–1。')
+    if accent_crop and not artwork:
+        raise InputError('装饰区域需要指定原图。')
     if not 48 <= height <= 256:
         raise InputError('装饰图高度须为 48–256 像素。')
     default = Path('/usr/share/fcitx/skin/default')
@@ -25,11 +30,15 @@ def build(output: Path, artwork: Path | None = None,
         raise InputError('找不到 Fcitx 4 默认皮肤。')
     # Rendering source coordinates is analogous to placing a sprite in a UI.
     # No artwork file or personal filename is included in the project itself.
-    source = cairo.ImageSurface.create_from_png(str(artwork)) if artwork else None
+    try:
+        source = cairo.ImageSurface.create_from_png(str(artwork)) if artwork else None
+    except cairo.Error as exc:
+        raise InputError('无法读取 PNG 装饰图。') from exc
     if source:
         x, y, w, h = crop or (0, 0, source.get_width(), source.get_height())
-        if min(x, y) < 0 or min(w, h) <= 0 or x + w > source.get_width() or y + h > source.get_height():
-            raise InputError('装饰图裁切区域超出图片范围。')
+        for rx, ry, rw, rh in [(x, y, w, h)] + ([accent_crop] if accent_crop else []):
+            if min(rx, ry) < 0 or min(rw, rh) <= 0 or rx + rw > source.get_width() or ry + rh > source.get_height():
+                raise InputError('装饰图裁切区域超出图片范围。')
     output.mkdir(parents=True, exist_ok=True)
     for item in default.glob('*.png'):
         shutil.copyfile(item, output / item.name)
@@ -45,9 +54,9 @@ def build(output: Path, artwork: Path | None = None,
                               (a+radius, a+radius, math.pi)):
             ctx.arc(cx, cy, radius, start, start+math.pi/2)
         ctx.close_path()
-        ctx.set_source_rgba(1, .97, .995, .98)
+        ctx.set_source_rgba(1, .98, 1, opacity)
         ctx.fill_preserve()
-        ctx.set_source_rgba(.72, .48, .78, .95)
+        ctx.set_source_rgba(.66, .32, .78, .20)
         ctx.set_line_width(1.5)
         ctx.stroke()
         surface.write_to_png(str(output / name))
@@ -65,21 +74,24 @@ def build(output: Path, artwork: Path | None = None,
         ctx.fill()
         surface.write_to_png(str(output/name))
     if source:
-        scale = height / h
-        width = math.ceil(w * scale)
-        surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, width, height)
-        ctx = cairo.Context(surface)
-        ctx.scale(scale, scale)
-        ctx.set_source_surface(source, -x, -y)
-        ctx.get_source().set_filter(cairo.FILTER_BEST)
-        ctx.paint()
-        surface.write_to_png(str(output/'decoration.png'))
+        regions = [('decoration.png', (x, y, w, h))]
+        if accent_crop: regions.append(('accent.png', accent_crop))
+        for name, (rx, ry, rw, rh) in regions:
+            scale = height / rh
+            surface = cairo.ImageSurface(cairo.FORMAT_ARGB32, math.ceil(rw * scale), height)
+            ctx = cairo.Context(surface)
+            ctx.scale(scale, scale)
+            ctx.set_source_surface(source, -rx, -ry)
+            ctx.get_source().set_filter(cairo.FILTER_BEST)
+            ctx.paint()
+            surface.write_to_png(str(output/name))
 
     config = configparser.ConfigParser(interpolation=None)
     config.optionxform = str
     config.read(default/'fcitx_skin.conf')
     updates = {
-        'SkinInfo': {'Name': 'Guitar Input', 'Version': '0.3', 'Author': 'Guitar Input contributors', 'Desc': 'Compact native candidate panel'},
+        'GuitarPanel': {'Opacity':str(opacity)},
+        'SkinInfo': {'Name': 'Guitar Input', 'Version': '0.4', 'Author': 'Guitar Input contributors', 'Desc': 'Compact native candidate panel'},
         'SkinFont': {'FontSize':'12', 'MenuFontSize':'11', 'RespectDPI':'True',
                      'TipColor':'128 77 143', 'InputColor':'65 35 91', 'IndexColor':'157 112 165',
                      'FirstCandColor':'163 37 133', 'UserPhraseColor':'83 52 112',
@@ -113,6 +125,8 @@ def activate(source: Path) -> Path:
     if config_path.exists(): shutil.copy2(config_path,backup/config_path.name)
     if target.exists(): shutil.copytree(target,backup/'skin')
     target.mkdir(parents=True,exist_ok=True)
+    for name in ('decoration.png', 'accent.png'):
+        if not (source/name).exists(): (target/name).unlink(missing_ok=True)
     for item in source.iterdir():
         if item.is_file() and item.suffix.lower() in ('.png','.conf'):
             atomic_write(target/item.name,item.read_bytes())

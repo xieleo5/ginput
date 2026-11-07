@@ -13,7 +13,7 @@ if os.environ.get('GINPUT_REQUIRE_PANEL') == '1' and not AVAILABLE:
 
 @unittest.skipUnless(AVAILABLE, 'requires fcitx-libs-dev and a C compiler')
 class PanelTests(unittest.TestCase):
-    def test_keyboard_and_key_release_layout_regression(self):
+    def test_grid_paging_selection_and_renderer_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             binary = Path(directory) / 'panel-probe'
             source = Path(__file__).with_name('panel_probe.c')

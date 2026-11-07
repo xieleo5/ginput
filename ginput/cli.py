@@ -73,7 +73,9 @@ def main(argv=None) -> int:
     skin_build.add_argument('--output',type=Path,required=True)
     skin_build.add_argument('--artwork',type=Path)
     skin_build.add_argument('--crop',help='图片区域 x,y,width,height')
-    skin_build.add_argument('--height',type=int,default=140)
+    skin_build.add_argument('--height',type=int,default=180)
+    skin_build.add_argument('--accent-crop',help='左侧装饰区域 x,y,width,height')
+    skin_build.add_argument('--opacity',type=float,default=.22)
     skin_activate = skin_sub.add_parser('activate')
     skin_activate.add_argument('directory',type=Path)
     args = parser.parse_args(argv)
@@ -84,7 +86,9 @@ def main(argv=None) -> int:
             if args.skin_action == 'build':
                 crop = tuple(map(int,args.crop.split(','))) if args.crop else None
                 if crop and len(crop)!=4: raise InputError('crop 需要 x,y,width,height 四个数字。')
-                build(args.output.expanduser().resolve(), args.artwork.expanduser().resolve() if args.artwork else None, crop, args.height)
+                accent = tuple(map(int,args.accent_crop.split(','))) if args.accent_crop else None
+                if accent and len(accent)!=4: raise InputError('accent-crop 需要四个数字。')
+                build(args.output.expanduser().resolve(), args.artwork.expanduser().resolve() if args.artwork else None, crop, args.height, accent, args.opacity)
                 print(f'皮肤已生成：{args.output}')
             else:
                 backup = activate(args.directory.expanduser().resolve())

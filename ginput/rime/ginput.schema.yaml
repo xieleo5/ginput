@@ -1,7 +1,7 @@
 schema:
   schema_id: ginput
   name: Guitar Input · 拼音
-  version: '0.3.0'
+  version: '0.4.0'
   author: [Guitar]
   description: 本地个人词库、全拼简拼、常见换序与邻键容错、输入习惯学习。
 switches:
