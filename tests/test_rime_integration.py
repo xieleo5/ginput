@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from ginput import core
 
@@ -41,6 +42,8 @@ class RimeIntegration(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory(dir=self.root)
         self.addCleanup(self.directory.cleanup)
         self.folder = Path(self.directory.name)
+        environment=patch.dict(os.environ,{'XDG_RUNTIME_DIR':str(self.folder/'runtime')})
+        environment.start();self.addCleanup(environment.stop)
         self.config = core.default_config() | {
             'words': str(self.folder / 'words.tsv'),
             'rime_dir': str(self.folder / 'rime'),
@@ -108,8 +111,48 @@ class RimeIntegration(unittest.TestCase):
         core.sync(self.config)
         # A visible 你好 matching only a prefix must not silently eat the final q.
         result = subprocess.run([str(self.probe), str(SHARED), self.config['rime_dir'],
-                                 'nihaoq', '--commit', '你好'], capture_output=True, text=True)
+                                 'nihsoq', '--commit', '你好'], capture_output=True, text=True)
         self.assertEqual(result.returncode, 6, result.stdout + result.stderr)
+
+    def test_bounded_cost_and_legal_abbreviations_precede_edits(self):
+        core.sync(self.config)
+        for keys,word in [('gem','哥们'),('zhonwgen','中文'),('biaodia','标点')]:
+            with self.subTest(keys=keys):
+                self.assertEqual(self.candidates(keys)[0],word)
+                self.assert_commits(keys,word)
+        choices=self.candidates('shiyou')
+        self.assertLess(choices.index('是有'),choices.index('石头'))
+        for keys,word in [('nihsoq','你好'),('nihapq','你好'),('zhonwgne','中文')]:
+            result=subprocess.run([str(self.probe),str(SHARED),self.config['rime_dir'],keys,'--commit',word],capture_output=True,text=True)
+            self.assertIn(result.returncode,(5,6),keys+result.stdout+result.stderr)
+
+    def test_personal_preferences_and_compounds_are_ordinary_dictionary_entries(self):
+        Path(self.config['words']).write_text('是有\tshi you\t100000\n无限量\twu xian liang\t100000\n')
+        core.sync(self.config)
+        for keys,word in [('shiyou','是有'),('wuxianliang','无限量')]:
+            self.assertEqual(self.candidates(keys)[0],word)
+            self.assert_commits(keys,word)
+
+    def test_ascii_punctuation_alone_and_after_composition(self):
+        core.sync(self.config)
+        punctuation='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'
+        for typed,expected in [(punctuation,punctuation)]+[('nihao'+mark,'你好'+mark) for mark in punctuation]:
+            with self.subTest(typed=typed):
+                result=subprocess.run([str(self.probe),str(SHARED),self.config['rime_dir'],typed,'--type',expected],capture_output=True,text=True)
+                self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_context_is_window_scoped_and_cannot_override_spelling_cost(self):
+        core.sync(self.config)
+        runtime=self.folder/'runtime/ginput';runtime.mkdir(parents=True)
+        (runtime/'context.tsv').write_text(f'one\t{int(time.time())}\n是有\t1\n石头\t1\n')
+        (runtime/'active-window').write_text('one\n')
+        self.assertEqual(self.candidates('shiyou')[0],'是有')
+        choices=self.candidates('shiyou');self.assertGreater(choices.index('石头'),choices.index('石油'))
+        (runtime/'active-window').write_text('two\n')
+        self.assertEqual(self.candidates('shiyou')[0],'石油')
+        (runtime/'active-window').write_text('one\n')
+        (runtime/'context.tsv').write_text('one\t1\n是有\t1\n')
+        self.assertEqual(self.candidates('shiyou')[0],'石油')
 
     def test_recompile_adds_new_word_and_removes_old_static_word(self):
         core.sync(self.config)

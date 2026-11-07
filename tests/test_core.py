@@ -73,6 +73,32 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(userdb.read_bytes(), b'learned input')
         self.assertEqual(other.read_bytes(), b'other custom schemas')
 
+    def test_shared_lua_loader_is_preserved_without_duplicate_managed_blocks(self):
+        path=self.root/'rime/rime.lua'
+        core.atomic_write(path,b'other_filter = require("other").filter\n')
+        with patch.object(core,'compile_dictionary',self.fake_compile):
+            core.sync(self.config);core.sync(self.config,force=True)
+        text=path.read_text()
+        self.assertTrue(text.startswith('other_filter = require("other").filter\n'))
+        self.assertEqual(text.count(core.LOADER_BEGIN),1)
+        self.assertIn('ginput_correction = require("ginput").translator',text)
+
+    def test_invalid_shared_lua_loader_prevents_publish(self):
+        path=self.root/'rime/rime.lua'
+        core.atomic_write(path,core.LOADER_BEGIN.encode())
+        with patch.object(core,'compile_dictionary',self.fake_compile),self.assertRaises(core.InputError):
+            core.sync(self.config)
+        self.assertEqual(path.read_text(),core.LOADER_BEGIN)
+        self.assertFalse((self.root/'rime/ginput.schema.yaml').exists())
+
+    def test_learning_changed_during_compile_is_retried(self):
+        def changing(config,words,revision,stage):
+            self.fake_compile(config,words,revision,stage)
+            (self.root/'learned.tsv').write_text('新词\txin ci\t3000\n')
+        with patch.object(core,'compile_dictionary',changing),self.assertRaises(core.Pending):
+            core.sync(self.config)
+        self.assertFalse((self.root/'rime/ginput.dict.yaml').exists())
+
     def test_unchanged_dictionary_does_not_rebuild(self):
         with patch.object(core, 'compile_dictionary', side_effect=self.fake_compile) as compile_mock:
             core.sync(self.config)

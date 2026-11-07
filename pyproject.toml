@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "guitar-input"
-version = "0.4.0"
+version = "0.5.0"
 description = "Linux Pinyin input method with local dictionary management"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -17,4 +17,4 @@ ginput = "ginput.cli:main"
 include = ["ginput*"]
 
 [tool.setuptools.package-data]
-ginput = ["rime/*.yaml", "examples/*.tsv"]
+ginput = ["rime/*.yaml", "rime/*.lua", "examples/*.tsv"]

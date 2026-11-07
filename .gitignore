@@ -17,3 +17,9 @@ words.tsv
 *.so
 *.previous
 *.png
+*.sqlite3*
+*.jsonl
+learned.tsv
+learning.json
+context.tsv
+active-window

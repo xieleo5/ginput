@@ -18,6 +18,9 @@ if os.environ.get('GINPUT_REQUIRE_UI') == '1' and not AVAILABLE:
 @unittest.skipUnless(AVAILABLE, 'requires GTK 3 and a display')
 class PanelUITests(unittest.TestCase):
     def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        environment=patch.dict(os.environ,{name:str(Path(self.tmp.name)/name) for name in ('XDG_CONFIG_HOME','XDG_DATA_HOME','XDG_STATE_HOME','XDG_RUNTIME_DIR')})
+        environment.start();self.addCleanup(environment.stop)
         self.a, self.b = socket.socketpair(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         self.window = CandidateWindow(self.a)
         self.assertEqual(self.b.recv(32), b'ready')

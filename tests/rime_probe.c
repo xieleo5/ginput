@@ -4,7 +4,7 @@
 #include <string.h>
 
 int main(int argc, char **argv) {
-    if (argc != 4 && !(argc == 6 && strcmp(argv[4], "--commit") == 0)) return 2;
+    if (argc != 4 && !(argc == 6 && (strcmp(argv[4], "--commit") == 0 || strcmp(argv[4], "--type") == 0))) return 2;
     RIME_STRUCT(RimeTraits, traits);
     traits.shared_data_dir = argv[1];
     traits.user_data_dir = argv[2];
@@ -15,6 +15,21 @@ int main(int argc, char **argv) {
     RimeSessionId session = RimeCreateSession();
     if (!session || !RimeSelectSchema(session, "ginput")) return 3;
     RimeSetOption(session, "ascii_mode", False);
+    if (argc==6 && !strcmp(argv[4],"--type")) {
+        char output[8192]={0};
+        for (const unsigned char *key=(const unsigned char*)argv[3];*key;++key) {
+            int handled=RimeProcessKey(session,*key,0);
+            RIME_STRUCT(RimeCommit, commit);
+            if (RimeGetCommit(session,&commit)) {
+                strncat(output,commit.text,sizeof(output)-strlen(output)-1);
+                RimeFreeCommit(&commit);
+            }
+            if (!handled && strlen(output)+1<sizeof(output)) {size_t n=strlen(output);output[n]=*key;output[n+1]=0;}
+        }
+        puts(output);
+        int result=strcmp(output,argv[5])!=0;
+        RimeDestroySession(session);RimeFinalize();return result;
+    }
     if (!RimeSimulateKeySequence(session, argv[3])) return 4;
     RimeApi *api = rime_get_api();
     RimeCandidateListIterator iterator = {0};

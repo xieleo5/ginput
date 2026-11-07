@@ -17,7 +17,10 @@ import unicodedata
 
 PACKAGE = Path(__file__).resolve().parent
 ARTIFACTS = ("ginput.schema.yaml", "ginput.prism.bin", "ginput.table.bin", "ginput.reverse.bin")
-SOURCES = ("ginput.schema.yaml", "ginput.dict.yaml", "ginput_personal.dict.yaml")
+SOURCES = ("ginput.schema.yaml", "ginput.dict.yaml", "ginput_personal.dict.yaml",
+           "lua/ginput.lua", "ginput.lexicon.tsv", "rime.lua")
+LOADER_BEGIN = '-- BEGIN GINPUT MANAGED LOADER'
+LOADER_END = '-- END GINPUT MANAGED LOADER'
 PINYIN = re.compile(r"[a-z]+(?: [a-z]+)*\Z")
 
 
@@ -136,24 +139,54 @@ def initialize(path: Path) -> dict:
 
 
 def read_words(config: dict) -> tuple[bytes, list[Word]]:
-    data = Path(config['words']).read_bytes()
-    if len(data) > 10 * 1024 * 1024:
+    path = Path(config['words'])
+    data = path.read_bytes()
+    learned_path = path.with_name('learned.tsv')
+    learned = learned_path.read_bytes() if learned_path.exists() else b''
+    if len(data) + len(learned) > 10 * 1024 * 1024:
         raise InputError('词库超过 10 MiB；请拆分或精简后重试。')
     try:
-        return data, parse_words(data.decode('utf-8-sig'))
+        manual_words = parse_words(data.decode('utf-8-sig'))
+        merged = {(word.text, word.pinyin): word for word in parse_words(learned.decode('utf-8-sig'))}
+        merged.update({(word.text, word.pinyin): word for word in manual_words})
+        return data + b'\0LEARNED\0' + learned, list(merged.values())
     except UnicodeDecodeError as exc:
         raise InputError('词库必须使用 UTF-8 编码。') from exc
 
 
 def fingerprint(config: dict, data: bytes) -> str:
     digest = hashlib.sha256()
-    for item in (data, (PACKAGE / 'rime/ginput.schema.yaml').read_bytes(), json.dumps(config, sort_keys=True).encode()):
+    for item in (data, (PACKAGE / 'rime/ginput.schema.yaml').read_bytes(),
+                 (PACKAGE / 'rime/ginput.lua').read_bytes(), json.dumps(config, sort_keys=True).encode()):
         digest.update(item)
         digest.update(b'\0')
     return digest.hexdigest()
 
 
-def render_sources(words: list[Word], revision: str) -> dict[str, bytes]:
+def lexicon(words: list[Word], base_dictionary: Path | None = None) -> bytes:
+    entries = {}
+    if base_dictionary:
+        for line in base_dictionary.read_text().splitlines():
+            parts = line.split('\t')
+            if len(parts) >= 3 and PINYIN.fullmatch(parts[1]) and parts[2].isdigit():
+                entries[parts[0], parts[1]] = int(parts[2])
+    for word in words:
+        entries[word.text, word.pinyin] = max(word.weight, entries.get((word.text, word.pinyin), 0))
+    return ''.join(f'{text}\t{code}\t{weight}\n' for (text, code), weight in sorted(entries.items())).encode()
+
+
+def merge_loader(existing: bytes, managed: bytes) -> bytes:
+    text = existing.decode('utf-8')
+    if LOADER_BEGIN in text or LOADER_END in text:
+        if text.count(LOADER_BEGIN) != 1 or text.count(LOADER_END) != 1 or text.index(LOADER_BEGIN) > text.index(LOADER_END):
+            raise InputError('rime.lua 中的 Guitar Input 配置段不完整，未修改文件。')
+        start, end = text.index(LOADER_BEGIN), text.index(LOADER_END) + len(LOADER_END)
+        if text[end:end+1] == '\n': end += 1
+        text = text[:start] + text[end:]
+    return text.encode() + (b'\n' if text and not text.endswith('\n') else b'') + managed
+
+
+def render_sources(words: list[Word], revision: str, base_dictionary: Path | None = None) -> dict[str, bytes]:
     personal = '\n'.join(f'{w.text}\t{w.pinyin}\t{w.weight}' for w in words)
     return {
         'ginput.schema.yaml': (PACKAGE / 'rime/ginput.schema.yaml').read_bytes(),
@@ -164,6 +197,11 @@ def render_sources(words: list[Word], revision: str) -> dict[str, bytes]:
         'ginput_personal.dict.yaml': (
             f'---\nname: ginput_personal\nversion: "{revision}"\nsort: by_weight\n...\n{personal}\n'
         ).encode(),
+        'lua/ginput.lua': (PACKAGE / 'rime/ginput.lua').read_bytes(),
+        'ginput.lexicon.tsv': lexicon(words, base_dictionary),
+        'rime.lua': (LOADER_BEGIN + '\n'
+                     'ginput_correction = require("ginput").translator\n'
+                     'ginput_ranking = require("ginput").filter\n' + LOADER_END + '\n').encode(),
     }
 
 
@@ -175,7 +213,7 @@ def compile_dictionary(config: dict, words: list[Word], revision: str, stage: Pa
     if not shutil.which(config['deployer']):
         raise InputError('找不到 rime_deployer；请安装 librime-bin。')
     stage.mkdir(parents=True, exist_ok=True)
-    for name, content in render_sources(words, revision).items():
+    for name, content in render_sources(words, revision, shared / 'pinyin_simp.dict.yaml').items():
         atomic_write(stage / name, content)
     atomic_write(stage / 'default.custom.yaml', b'patch:\n  schema_list:\n    - schema: ginput\n')
     result = subprocess.run(
@@ -212,7 +250,7 @@ def ensure_inactive(config: dict) -> None:
 
 
 def publish(stage: Path, target: Path, state: Path) -> None:
-    """Keep a recovery journal before replacing each of our seven managed files."""
+    """Journal managed files; preserve unrelated code in the shared Lua loader."""
     files = list(SOURCES) + [f'build/{name}' for name in ARTIFACTS]
     # Store bytes as hex: no unsafe paths, pickle, or arbitrary backup-file reads.
     previous = {}
@@ -221,11 +259,13 @@ def publish(stage: Path, target: Path, state: Path) -> None:
         if path.is_symlink():
             raise InputError(f'拒绝覆盖符号链接：{path}')
         previous[name] = path.read_bytes().hex() if path.exists() else None
+    loader = target / 'rime.lua'
+    merged_loader = merge_loader(loader.read_bytes() if loader.exists() else b'', (stage / 'rime.lua').read_bytes())
     journal = {'target': str(target), 'files': previous}
     write_json(state / 'pending-transaction.json', journal)
     try:
         for name in files:
-            atomic_write(target / name, (stage / name).read_bytes())
+            atomic_write(target / name, merged_loader if name == 'rime.lua' else (stage / name).read_bytes())
     except BaseException:
         recover(target, state)
         raise
@@ -239,7 +279,8 @@ def recover(target: Path, state: Path) -> None:
         return
     journal = json.loads(path.read_text())
     expected = set(SOURCES) | {f'build/{name}' for name in ARTIFACTS}
-    if journal['target'] != str(target) or set(journal['files']) != expected:
+    legacy = expected - {'lua/ginput.lua', 'ginput.lexicon.tsv', 'rime.lua'}
+    if journal['target'] != str(target) or set(journal['files']) not in (expected, legacy):
         raise InputError('未完成的更新与当前目标不一致；保留恢复记录，停止覆盖。')
     for name, data in journal['files'].items():
         dest = target / name
@@ -275,7 +316,7 @@ def sync(config: dict, force: bool = False) -> dict:
                 if (stage / 'compile.log').exists():
                     atomic_write(state / 'last-compile.log', (stage / 'compile.log').read_bytes())
             # Editor may save again or user may start typing while compilation runs.
-            if Path(config['words']).read_bytes() != data:
+            if read_words(config)[0] != data:
                 raise Pending('编译期间词库再次改变，将重新编译最新版本。')
             ensure_inactive(config)
             publish(stage, target, state)
@@ -315,7 +356,7 @@ def watch(path: Path, interval: float = 0.5) -> None:
         now = time.monotonic()
         try:
             config = load_config(path)
-            data = Path(config['words']).read_bytes()
+            data, _ = read_words(config)
             revision = fingerprint(config, data)
             if debounce.ready(revision, now) and revision != last_done and now >= retry_at:
                 result = sync(config)

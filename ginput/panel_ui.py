@@ -7,6 +7,7 @@ import math
 import os
 from pathlib import Path
 import socket
+import sqlite3
 
 import cairo
 import gi
@@ -15,12 +16,17 @@ gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
 gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
+try:
+    from .learning import LearningStore
+except ImportError:
+    from learning import LearningStore
 
 
 class CandidateWindow(Gtk.Window):
     def __init__(self, channel):
         super().__init__(type=Gtk.WindowType.POPUP)
         self.channel = channel
+        self.learning = LearningStore()
         self.state = {}
         self.cells = []
         self.arrows = []
@@ -53,6 +59,7 @@ class CandidateWindow(Gtk.Window):
         channel.send(b'ready')
 
     def cleanup(self, _widget):
+        self.learning.close()
         if self.watch and GLib.MainContext.default().find_source_by_id(self.watch):
             GLib.source_remove(self.watch)
         self.watch = 0
@@ -89,6 +96,10 @@ class CandidateWindow(Gtk.Window):
             state = json.loads(packet)
         except (OSError, ValueError):
             self.hide(); Gtk.main_quit(); return False
+        if state.get('event'):
+            try: self.learning.event(state)
+            except (OSError, ValueError, sqlite3.Error): self.learning.close()
+            return True
         if state.get('hide'):
             self.state = {}; self.hide(); return True
         if not isinstance(state.get('words'), list) or len(state['words']) > 20:

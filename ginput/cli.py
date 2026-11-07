@@ -2,6 +2,7 @@ import argparse
 import json
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import sys
 
@@ -67,6 +68,10 @@ def main(argv=None) -> int:
     sub.add_parser('watch', help='监视词库，保存后自动更新')
     svc = sub.add_parser('service', help='管理用户级自动更新服务')
     svc.add_argument('action', choices=['enable', 'disable'])
+    learning = sub.add_parser('learning', help='管理本机输入历史与个人学习')
+    learning.add_argument('action', choices=['enable', 'disable', 'status', 'clear-history'])
+    learning.add_argument('--retention-days', type=int, default=7, help='原始历史保留天数；0 表示直到手动清除')
+    learning.add_argument('--include-learned', action='store_true', help='清除历史时同时清除本工具的自动词表和相邻词统计；保留手工词库与 Rime userdb')
     skin = sub.add_parser('skin', help='生成或启用本机 Fcitx 皮肤')
     skin_sub = skin.add_subparsers(dest='skin_action', required=True)
     skin_build = skin_sub.add_parser('build')
@@ -81,6 +86,16 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         args.config = args.config.expanduser().resolve()
+        if args.command == 'learning':
+            from .learning import LearningStore, configure
+            store = LearningStore()
+            try:
+                if args.action == 'enable': configure(True,args.retention_days)
+                elif args.action == 'disable': configure(False,store.retention_days)
+                elif args.action == 'clear-history': store.clear(args.include_learned)
+                print(json.dumps(store.status(),ensure_ascii=False,indent=2))
+            finally: store.close()
+            return 0
         if args.command == 'skin':
             from .skin import build, activate
             if args.skin_action == 'build':
@@ -111,6 +126,7 @@ def main(argv=None) -> int:
             checks = {config['deployer']: bool(shutil.which(config['deployer'])),
                       'pinyin_simp.dict.yaml': (Path(config['shared_data']) / 'pinyin_simp.dict.yaml').is_file(),
                       'default.yaml': (Path(config['shared_data']) / 'default.yaml').is_file()}
+            checks['librime-plugin-lua'] = any(Path('/usr/lib').glob('*/rime-plugins/librime-lua.so')) or Path('/usr/lib/rime-plugins/librime-lua.so').is_file()
             if config['reload'] == 'fcitx4':
                 checks['fcitx-remote'] = bool(shutil.which('fcitx-remote'))
                 checks['fcitx-rime addon'] = Path('/usr/share/fcitx/addon/fcitx-rime.conf').is_file()
@@ -136,7 +152,7 @@ def main(argv=None) -> int:
     except Pending as exc:
         print(str(exc), file=sys.stderr)
         return 3
-    except (InputError, OSError, ValueError, subprocess.SubprocessError) as exc:
+    except (InputError, OSError, ValueError, sqlite3.Error, subprocess.SubprocessError) as exc:
         print(f'ginput: {exc}', file=sys.stderr)
         return 1
     except KeyboardInterrupt:

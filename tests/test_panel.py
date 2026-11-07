@@ -18,5 +18,5 @@ class PanelTests(unittest.TestCase):
             binary = Path(directory) / 'panel-probe'
             source = Path(__file__).with_name('panel_probe.c')
             subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
-                            '-isystem', str(INCLUDE), str(source), '-o', str(binary)], check=True)
+                            '-isystem', str(INCLUDE), str(source), '-l:libX11.so.6', '-o', str(binary)], check=True)
             subprocess.run([str(binary)], check=True)

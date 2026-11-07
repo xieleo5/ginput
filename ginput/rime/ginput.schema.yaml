@@ -1,7 +1,7 @@
 schema:
   schema_id: ginput
   name: Guitar Input · 拼音
-  version: '0.4.0'
+  version: '0.5.0'
   author: [Guitar]
   description: 本地个人词库、全拼简拼、常见换序与邻键容错、输入习惯学习。
 switches:
@@ -9,12 +9,13 @@ switches:
     reset: 0
     states: [中文, English]
   - name: ascii_punct
+    reset: 1
     states: [。，, ．，]
 engine:
   processors: [ascii_composer, recognizer, key_binder, speller, punctuator, selector, navigator, express_editor]
   segmentors: [ascii_segmentor, matcher, abc_segmentor, punct_segmentor, fallback_segmentor]
-  translators: [punct_translator, script_translator]
-  filters: [uniquifier]
+  translators: [punct_translator, script_translator, lua_translator@ginput_correction]
+  filters: [lua_filter@ginput_ranking, uniquifier]
 ascii_composer:
   good_old_caps_lock: true
   switch_key:
@@ -25,7 +26,7 @@ ascii_composer:
     Caps_Lock: clear
 speller:
   alphabet: abcdefghijklmnopqrstuvwxyz
-  delimiter: " '"
+  delimiter: " "
   algebra:
     # Syllabic n/m otherwise take precedence over initials in nhao, etc.
     - erase/^(hm|m|n|ng)$/
@@ -34,18 +35,17 @@ speller:
     - abbrev/^([a-z]).+$/$1/
     - abbrev/^([zcs]h).+$/$1/
     - derive/^([nl])ue$/$1ve/
-    # Common swaps within a syllable; keep every original spelling.
-    - derive/([aeiou])ng$/$1gn/
-    - derive/ao$/oa/
-    - derive/([iu])a(o|ng?)$/a$1$2/
+
 translator:
   dictionary: ginput
   user_dict: ginput
   enable_user_dict: true
   enable_sentence: true
   enable_completion: true
-  # Rime's bounded keyboard-neighbor search, not arbitrary reordering.
-  enable_correction: true
+  # The Lua layer applies one edit to the entire input; no recursive syllable edits.
+  enable_correction: false
+  spelling_hints: 64
+  always_show_comments: true
   preedit_format:
     - xform/([nl])v/$1ü/
 menu:
@@ -53,6 +53,10 @@ menu:
 punctuator:
   import_preset: default
 key_binder:
-  import_preset: default
+  # Punctuation commits ASCII characters; PageUp/PageDown handle paging.
+  bindings: []
 recognizer:
   import_preset: default
+  patterns:
+    # @ must commit the current Chinese candidate and remain ASCII punctuation.
+    email: '^$'
