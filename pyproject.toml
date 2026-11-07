@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "guitar-input"
+version = "0.1.0"
+description = "Guitar's personal Linux Pinyin input method and local dictionary manager"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Guitar"}]
+
+[project.scripts]
+ginput = "ginput.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["ginput*"]
+
+[tool.setuptools.package-data]
+ginput = ["rime/*.yaml", "examples/*.tsv"]

@@ -1,0 +1,5 @@
+# Guitar Input 示例；三列之间用 Tab 分隔。
+# 词语	无声调拼音（音节用空格分隔）	权重
+示例输入法	shi li shu ru fa	10000
+示例短语	shi li duan yu	10000
+自定义词库	zi ding yi ci ku	10000

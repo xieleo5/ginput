@@ -1,0 +1,17 @@
+name: Tests
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rime test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y librime-bin librime-dev rime-data-pinyin-simp rime-prelude
+      - name: Unit and real Rime integration tests
+        env:
+          GINPUT_REQUIRE_RIME: '1'
+        run: python3 -m unittest discover -s tests -v

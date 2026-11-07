@@ -1,0 +1,48 @@
+schema:
+  schema_id: ginput
+  name: Guitar Input · 拼音
+  version: '0.1.0'
+  author: [Guitar]
+  description: 本地个人词库、简体全拼及输入习惯学习。
+switches:
+  - name: ascii_mode
+    reset: 0
+    states: [中文, English]
+  - name: ascii_punct
+    states: [。，, ．，]
+engine:
+  processors: [ascii_composer, recognizer, key_binder, speller, punctuator, selector, navigator, express_editor]
+  segmentors: [ascii_segmentor, matcher, abc_segmentor, punct_segmentor, fallback_segmentor]
+  translators: [punct_translator, script_translator]
+  filters: [uniquifier]
+ascii_composer:
+  good_old_caps_lock: true
+  switch_key:
+    Shift_L: inline_ascii
+    Shift_R: commit_text
+    Control_L: noop
+    Control_R: noop
+    Caps_Lock: clear
+speller:
+  alphabet: abcdefghijklmnopqrstuvwxyz
+  delimiter: " '"
+  algebra:
+    - abbrev/^([a-z]).+$/$1/
+    - abbrev/^([zcs]h).+$/$1/
+    - derive/^([nl])ue$/$1ve/
+translator:
+  dictionary: ginput
+  user_dict: ginput
+  enable_user_dict: true
+  enable_sentence: true
+  enable_completion: true
+  preedit_format:
+    - xform/([nl])v/$1ü/
+menu:
+  page_size: 5
+punctuator:
+  import_preset: default
+key_binder:
+  import_preset: default
+recognizer:
+  import_preset: default
