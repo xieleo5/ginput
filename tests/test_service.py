@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import shutil
 import subprocess
 import tempfile
@@ -14,5 +15,8 @@ class ServiceTests(unittest.TestCase):
             root = Path(folder)
             unit = root / 'ginput-watch.service'
             unit.write_text(service_unit(root, root / 'config.json'))
-            result = subprocess.run(['systemd-analyze', '--user', 'verify', str(unit)], capture_output=True, text=True)
+            # CI may have no desktop user session. Verification needs only a
+            # private runtime directory, not a running user service manager.
+            env = os.environ | {'XDG_RUNTIME_DIR': folder}
+            result = subprocess.run(['systemd-analyze', '--user', 'verify', str(unit)], env=env, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
