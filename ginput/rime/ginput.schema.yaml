@@ -1,7 +1,7 @@
 schema:
   schema_id: ginput
   name: Guitar Input · 拼音
-  version: '0.2.0'
+  version: '0.3.0'
   author: [Guitar]
   description: 本地个人词库、全拼简拼、常见换序与邻键容错、输入习惯学习。
 switches:
@@ -29,6 +29,8 @@ speller:
   algebra:
     # Syllabic n/m otherwise take precedence over initials in nhao, etc.
     - erase/^(hm|m|n|ng)$/
+    # v aliases yu (v/van/ve/vn); nv and lv retain their ü spelling.
+    - derive/^yu(.*)$/v$1/
     - abbrev/^([a-z]).+$/$1/
     - abbrev/^([zcs]h).+$/$1/
     - derive/^([nl])ue$/$1ve/

@@ -14,3 +14,6 @@ words.tsv
 *.bin
 *.log
 *.ssf
+*.so
+*.previous
+*.png

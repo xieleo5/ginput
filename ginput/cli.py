@@ -67,9 +67,29 @@ def main(argv=None) -> int:
     sub.add_parser('watch', help='监视词库，保存后自动更新')
     svc = sub.add_parser('service', help='管理用户级自动更新服务')
     svc.add_argument('action', choices=['enable', 'disable'])
+    skin = sub.add_parser('skin', help='生成或启用本机 Fcitx 皮肤')
+    skin_sub = skin.add_subparsers(dest='skin_action', required=True)
+    skin_build = skin_sub.add_parser('build')
+    skin_build.add_argument('--output',type=Path,required=True)
+    skin_build.add_argument('--artwork',type=Path)
+    skin_build.add_argument('--crop',help='图片区域 x,y,width,height')
+    skin_build.add_argument('--height',type=int,default=140)
+    skin_activate = skin_sub.add_parser('activate')
+    skin_activate.add_argument('directory',type=Path)
     args = parser.parse_args(argv)
     try:
         args.config = args.config.expanduser().resolve()
+        if args.command == 'skin':
+            from .skin import build, activate
+            if args.skin_action == 'build':
+                crop = tuple(map(int,args.crop.split(','))) if args.crop else None
+                if crop and len(crop)!=4: raise InputError('crop 需要 x,y,width,height 四个数字。')
+                build(args.output.expanduser().resolve(), args.artwork.expanduser().resolve() if args.artwork else None, crop, args.height)
+                print(f'皮肤已生成：{args.output}')
+            else:
+                backup = activate(args.directory.expanduser().resolve())
+                print(f'皮肤配置已启用；备份：{backup}。输入完成后重载 Fcitx 生效。')
+            return 0
         if args.command == 'init':
             config = initialize(args.config)
             print(f"配置：{args.config}\n个人词库：{config['words']}\n尚未修改系统输入法；下一步运行 doctor。")

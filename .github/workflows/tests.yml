@@ -10,8 +10,11 @@ jobs:
       - name: Install Rime test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y librime-bin librime-dev rime-data-pinyin-simp rime-prelude
+          sudo apt-get install -y librime-bin librime-dev rime-data-pinyin-simp rime-prelude fcitx-libs-dev
       - name: Unit and real Rime integration tests
         env:
           GINPUT_REQUIRE_RIME: '1'
+          GINPUT_REQUIRE_PANEL: '1'
         run: python3 -m unittest discover -s tests -v
+      - name: Compile native candidate panel
+        run: cc -std=gnu11 -Wall -Wextra -Werror -fPIC -shared -isystem /usr/include native/panel.c -o /tmp/fcitx-ginput-panel.so

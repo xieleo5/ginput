@@ -97,6 +97,13 @@ class RimeIntegration(unittest.TestCase):
             with self.subTest(keys=keys):
                 self.assertEqual(self.candidates(keys)[0], expected)
 
+    def test_v_aliases_yu_without_changing_nv_lv(self):
+        core.sync(self.config)
+        for keys, word in [('v', '雨'), ('van', '原'), ('ve', '月'), ('vn', '云'),
+                           ('vyan', '语言'), ('nv', '女'), ('lv', '绿')]:
+            with self.subTest(keys=keys):
+                self.assert_commits(keys, word)
+
     def test_partial_candidate_does_not_count_as_typo_correction(self):
         core.sync(self.config)
         # A visible 你好 matching only a prefix must not silently eat the final q.
