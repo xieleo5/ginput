@@ -67,6 +67,15 @@ int main(void) {
     press(&p,FcitxKey_Page_Up); assert(engine_page==4 && p.count==20);
     press(&p,FcitxKey_Page_Up); assert(engine_page==0);
     press(&p,FcitxKey_Down); press(&p,FcitxKey_3); assert(chosen==7);
+    /* Expanding from an ordinary page near the start must move Up backwards. */
+    engine_page=2; press(&p,FcitxKey_Down); press(&p,FcitxKey_Up);
+    assert(engine_page==0 && p.selected==5 && !strcmp(p.words[5].text,"word05"));
+    press(&p,FcitxKey_Escape);
+    /* A short final row clamps to its last candidate, rather than getting stuck. */
+    engine_page=8; press(&p,FcitxKey_Down);
+    for (int i=0;i<4;++i) press(&p,FcitxKey_Right);
+    press(&p,FcitxKey_Down); assert(p.selected==6);
+    press(&p,FcitxKey_Escape);
     engine_page=0; press(&p,FcitxKey_Down); press(&p,FcitxKey_Escape);
     assert(!p.expanded && total==47 && engine_page==0);
     INPUT_RETURN_VALUE result=IRV_TO_PROCESS;

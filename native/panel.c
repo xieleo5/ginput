@@ -188,16 +188,18 @@ static void update(void *arg) {
     p->dirty = true;
     if (!is_rime(p) || !FcitxCandidateWordGetListSize(candidates(p))) p->expanded = false;
 }
-static boolean change_page(Panel *p, boolean previous) {
+static int change_page(Panel *p, boolean previous) {
     if (p->dirty) collect(p);
     if (previous ? !p->previous : !p->next) return false;
     int steps = p->expanded ? (previous ? ROWS : p->pages) : 1;
+    int shifted = 0;
     for (int i = 0; i < steps; ++i) {
         boolean moved = previous ? FcitxCandidateWordGoPrevPage(candidates(p)) : FcitxCandidateWordGoNextPage(candidates(p));
         if (!moved) break;
+        ++shifted;
     }
     p->dirty = true; collect(p);
-    return true;
+    return shifted;
 }
 static INPUT_RETURN_VALUE choose(Panel *p, int index) {
     if (index < 0 || index >= p->count) return IRV_DO_NOTHING;
@@ -222,11 +224,14 @@ static boolean key_filter(void *arg, FcitxKeySym key, unsigned int state, INPUT_
             int index = key >= FcitxKey_1 && key <= FcitxKey_5 ? (p->selected / COLUMNS) * COLUMNS + (int)(key - FcitxKey_1) : p->selected;
             *result = choose(p, index); p->consumed = key; return true;
         } else if (key == FcitxKey_Down) {
-            if (p->selected + COLUMNS < p->count) p->selected += COLUMNS;
+            if (p->selected / COLUMNS < (p->count - 1) / COLUMNS) {
+                p->selected += COLUMNS;
+                if (p->selected >= p->count) p->selected = p->count - 1;
+            }
             else if (p->next) { int column = p->selected % COLUMNS; change_page(p, false); p->selected = column < p->count ? column : 0; }
         } else if (key == FcitxKey_Up) {
             if (p->selected >= COLUMNS) p->selected -= COLUMNS;
-            else if (p->previous) { int column = p->selected % COLUMNS; change_page(p, true); p->selected = ((p->count - 1) / COLUMNS) * COLUMNS + column; if (p->selected >= p->count) p->selected = p->count - 1; }
+            else if (p->previous) { int column = p->selected % COLUMNS; int shifted = change_page(p, true); p->selected = (shifted > 0 ? shifted - 1 : 0) * COLUMNS + column; if (p->selected >= p->count) p->selected = p->count - 1; }
         } else if (key == FcitxKey_Left) { if (p->selected > 0) --p->selected; }
         else if (key == FcitxKey_Right) { if (p->selected + 1 < p->count) ++p->selected; }
         else if (key == FcitxKey_Page_Down || key == FcitxKey_equal) change_page(p, false);
