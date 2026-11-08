@@ -29,7 +29,7 @@
 #define ROWS 4
 #define MAX_WORDS (COLUMNS * ROWS)
 extern char **environ;
-typedef struct { char *text; int page, index; } Word;
+typedef struct { char *text, *comment; int page, index; } Word;
 typedef struct {
     FcitxInstance *instance;
     boolean expanded, dirty, previous, next, ready;
@@ -39,6 +39,8 @@ typedef struct {
     FcitxKeySym consumed;
     FcitxInputContext *context;
     Word words[MAX_WORDS];
+    char *snapshot_preedit;
+    boolean snapshot_expanded;
     FcitxAddon *addon;
     FcitxUI *original, wrapped;
     Display *display;
@@ -58,7 +60,8 @@ static FcitxCandidateWordList *candidates(Panel *p) {
     return FcitxInputStateGetCandidateList(FcitxInstanceGetInputState(p->instance));
 }
 static void clear_words(Panel *p) {
-    for (int i = 0; i < p->count; ++i) free(p->words[i].text);
+    for (int i = 0; i < p->count; ++i) { free(p->words[i].text); free(p->words[i].comment); }
+    free(p->snapshot_preedit); p->snapshot_preedit=NULL;
     p->count = p->pages = 0;
 }
 static boolean send_packet(Panel *p, const char *text, size_t size) {
@@ -111,6 +114,17 @@ static void window_identity(Panel *p, char *key, size_t size) {
     }
     snprintf(key, size, "%ld:%lu", (long)getpid(), focus > 1 ? focus : (unsigned long)FcitxInstanceGetCurrentIC(p->instance));
 }
+static boolean same_spelling(const char *a, const char *b) {
+    if (!a || !b) return false;
+    /* Rime may remove display separators while moving to a selected grid page. */
+    for (;;) {
+        while (*a==' ' || *a=='\'') ++a;
+        while (*b==' ' || *b=='\'') ++b;
+        if (*a!=*b) return false;
+        if (!*a) return true;
+        ++a; ++b;
+    }
+}
 static void input_event(Panel *p, const char *kind, const char *value, FcitxKeySym key, unsigned int state) {
     boolean blocked = !is_rime(p) || (FcitxInstanceGetCurrentCapacity(p->instance) & CAPACITY_PASSWORD);
     char window[96];
@@ -136,7 +150,27 @@ static void input_event(Panel *p, const char *kind, const char *value, FcitxKeyS
     json_string(out,value);
     if (!strcmp(kind,"commit")) {
         char *preedit=FcitxUIMessagesToCString(FcitxInputStateGetPreedit(FcitxInstanceGetInputState(p->instance)));
-        fputs(",\"preedit\":",out);json_string(out,preedit);free(preedit);
+        fputs(",\"preedit\":",out);json_string(out,preedit);
+        boolean snapshot=p->context==FcitxInstanceGetCurrentIC(p->instance) && same_spelling(preedit,p->snapshot_preedit);
+        int count=snapshot?p->count:FcitxCandidateWordGetCurrentWindowSize(candidates(p));
+        if (count>MAX_WORDS) count=MAX_WORDS;
+        int selected=-1;
+        fputs(",\"candidates\":[",out);
+        for (int i=0;i<count;++i) {
+            FcitxCandidateWord *word=snapshot?NULL:FcitxCandidateWordGetByIndex(candidates(p),i);
+            const char *label=snapshot?p->words[i].text:(word?word->strWord:"");
+            const char *comment=snapshot?p->words[i].comment:(word?word->strExtra:"");
+            if (i) fputc(',',out);
+            fputs("{\"text\":",out);json_string(out,label);
+            fputs(",\"comment\":",out);json_string(out,comment);fputc('}',out);
+            if (selected<0 && label && value && !strcmp(label,value)) selected=i;
+        }
+        fprintf(out,"],\"selected_index\":%d,\"expanded\":%s",selected,snapshot && p->snapshot_expanded?"true":"false");
+        free(preedit);
+    } else if (!strcmp(kind,"feedback")) {
+        int x=0,y=0,w=0,h=0;
+        FcitxInstanceGetWindowRect(p->instance,FcitxInstanceGetCurrentIC(p->instance),&x,&y,&w,&h);
+        fprintf(out,",\"x\":%d,\"y\":%d",x,y+h);
     }
     fputs("}",out);fclose(out);
     if (p->ready) send_packet(p,packet,length);
@@ -160,7 +194,7 @@ static void collect(Panel *p) {
             FcitxCandidateWord *word = FcitxCandidateWordGetByIndex(list, i);
             if (!word || !word->strWord) continue;
             if (row == 0 && (word->wordType & MSG_REGULAR_MASK) == MSG_CANDIATE_CURSOR) selected = i;
-            p->words[p->count++] = (Word){strdup(word->strWord), row, i};
+            p->words[p->count++] = (Word){strdup(word->strWord), strdup(word->strExtra?word->strExtra:""), row, i};
         }
         ++p->pages;
         p->next = FcitxCandidateWordHasNext(list);
@@ -172,6 +206,8 @@ static void collect(Panel *p) {
     p->selected = selected;
     p->dirty = false;
     p->context = FcitxInstanceGetCurrentIC(p->instance);
+    p->snapshot_preedit=FcitxUIMessagesToCString(FcitxInputStateGetPreedit(FcitxInstanceGetInputState(p->instance)));
+    p->snapshot_expanded=p->expanded;
 }
 static void json_string(FILE *out, const char *s) {
     fputc('"', out);
@@ -271,6 +307,10 @@ static INPUT_RETURN_VALUE choose(Panel *p, int index) {
 static boolean key_filter(void *arg, FcitxKeySym key, unsigned int state, INPUT_RETURN_VALUE *result) {
     Panel *p = arg;
     attach_ui(p);
+    if ((key==FcitxKey_b || key==FcitxKey_B) && (state & FcitxKeyState_SimpleMask)==(FcitxKeyState_Ctrl|FcitxKeyState_Shift) && is_rime(p) && !(FcitxInstanceGetCurrentCapacity(p->instance) & CAPACITY_PASSWORD)) {
+        input_event(p,"feedback","",key,state);
+        p->consumed=key;*result=IRV_DO_NOTHING;return true;
+    }
     if ((key >= 32 && key <= 126) || key == FcitxKey_BackSpace || key == FcitxKey_Delete || key == FcitxKey_Escape || key == FcitxKey_Return || key == FcitxKey_Left || key == FcitxKey_Right || key == FcitxKey_Up || key == FcitxKey_Down || key == FcitxKey_Home || key == FcitxKey_End)
         input_event(p,"key","",key,state);
     if (!is_rime(p) || (FcitxInstanceGetCurrentCapacity(p->instance) & CAPACITY_PASSWORD) || (state & FcitxKeyState_SimpleMask) || !FcitxCandidateWordGetListSize(candidates(p)) || FcitxCandidateWordGetCurrentWindowSize(candidates(p)) > COLUMNS) return false;

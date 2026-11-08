@@ -140,11 +140,24 @@ function M.filter.func(translation, env)
     local item={candidate=candidate,category=4,score=0,order=ordinal}
     if candidate.type=='ginput_edit' then
       item.category=2;item.score=candidate.quality
-    elseif full and candidate.type~='sentence' and code:match('^[a-z ]+$') then
+    elseif full and code:match('^[a-z ]+$') then
       local typed=raw:sub(candidate.start+1,candidate._end)
       local cost=spelling_cost(typed,code)
       if cost then
-        if cost[1]==0 then item.category=0
+        if cost[1]==0 then
+          item.category=0
+          -- Full-spelling sentences are valid even without a whole dictionary
+          -- entry. Only an ambiguous vowel split (di+a vs dian, etc.) carries
+          -- a segmentation cost; it is not a blanket penalty on all sentences.
+          if candidate.type=='sentence' then
+            local previous, split=nil,false
+            for syllable in code:gmatch('%a+') do
+              if previous and previous:match('[aeiou]$') and syllable:match('^[aoe]$') then split=true end
+              previous=syllable
+            end
+            if split then item.category=2;item.score=1-.9 end
+          end
+        elseif candidate.type=='sentence' then item.category=3
         else
           item.category=1
           local entry=entries[candidate.text..'\t'..code]

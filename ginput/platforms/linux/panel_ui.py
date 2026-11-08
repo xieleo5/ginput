@@ -18,8 +18,10 @@ gi.require_version('PangoCairo', '1.0')
 from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
 try:
     from .learning import LearningStore
+    from .feedback import FeedbackStore
 except ImportError:
     from learning import LearningStore
+    from feedback import FeedbackStore
 
 
 class CandidateWindow(Gtk.Window):
@@ -27,6 +29,9 @@ class CandidateWindow(Gtk.Window):
         super().__init__(type=Gtk.WindowType.POPUP)
         self.channel = channel
         self.learning = LearningStore()
+        self.feedback = FeedbackStore()
+        self.notice = None
+        self.notice_timer = 0
         self.state = {}
         self.cells = []
         self.arrows = []
@@ -60,9 +65,35 @@ class CandidateWindow(Gtk.Window):
 
     def cleanup(self, _widget):
         self.learning.close()
+        self.feedback.close()
+        if self.notice_timer:GLib.source_remove(self.notice_timer);self.notice_timer=0
+        if self.notice:self.notice.destroy();self.notice=None
         if self.watch and GLib.MainContext.default().find_source_by_id(self.watch):
             GLib.source_remove(self.watch)
         self.watch = 0
+
+    def feedback_notice(self,message,event):
+        if self.notice_timer:GLib.source_remove(self.notice_timer);self.notice_timer=0
+        if self.notice:self.notice.destroy()
+        self.notice=Gtk.Window(type=Gtk.WindowType.POPUP)
+        self.notice.set_title('Guitar Input Feedback')
+        self.notice.set_accept_focus(False);self.notice.set_focus_on_map(False)
+        self.notice.set_skip_taskbar_hint(True);self.notice.set_skip_pager_hint(True)
+        label=Gtk.Label(label=message)
+        label.set_margin_top(10);label.set_margin_bottom(10)
+        label.set_margin_start(14);label.set_margin_end(14)
+        self.notice.add(label)
+        scale=self.get_scale_factor()
+        x,y=int(event.get('x',0)/scale),int(event.get('y',0)/scale)
+        work=self.get_display().get_monitor_at_point(x,y).get_workarea()
+        size=self.notice.get_preferred_size()[1]
+        self.notice.move(max(work.x,min(x,work.x+work.width-size.width)),max(work.y,min(y,work.y+work.height-size.height)))
+        self.notice.show_all()
+        def dismiss():
+            self.notice_timer=0
+            if self.notice:self.notice.destroy();self.notice=None
+            return False
+        self.notice_timer=GLib.timeout_add(2200,dismiss)
 
     def load_theme(self):
         root = Path(os.environ.get('XDG_CONFIG_HOME', str(Path.home() / '.config'))) / 'fcitx/skin/ginput-custom'
@@ -97,6 +128,13 @@ class CandidateWindow(Gtk.Window):
         except (OSError, ValueError):
             self.hide(); Gtk.main_quit(); return False
         if state.get('event'):
+            if state['event']=='feedback':
+                try: message=self.feedback.mark(state.get('window',''))['message']
+                except (OSError,ValueError,sqlite3.Error):
+                    self.feedback.close();message='反馈保存失败，请检查本机存储空间'
+                self.feedback_notice(message,state)
+                return True
+            self.feedback.observe(state)
             try: self.learning.event(state)
             except (OSError, ValueError, sqlite3.Error): self.learning.close()
             return True

@@ -100,6 +100,22 @@ class RimeIntegration(unittest.TestCase):
             with self.subTest(keys=keys):
                 self.assertEqual(self.candidates(keys)[0], expected)
 
+    def test_unlisted_full_spelling_sentence_precedes_even_high_weight_correction(self):
+        Path(self.config['words']).write_text('太少了\ttai shao le\t1000000\n我们少了\two men shao le\t1000000\n')
+        core.sync(self.config)
+        for keys,expected,wrong in [('taihaole','太好了','太少了'),('womenhaole','我们好了','我们少了')]:
+            with self.subTest(keys=keys):
+                self.assertNotIn(expected+'\t',(Path(self.config['rime_dir'])/'ginput.lexicon.tsv').read_text())
+                choices=self.candidates(keys)
+                self.assertEqual(choices[0],expected)
+                self.assertGreater(choices.index(wrong),choices.index(expected))
+                self.assert_commits(keys,expected)
+
+    def test_ambiguous_vowel_split_keeps_a_cost_without_penalizing_all_sentences(self):
+        core.sync(self.config)
+        self.assertEqual(self.candidates('biaodia')[0],'标点')
+        self.assertEqual(self.candidates('taihaolea')[0],'太好了啊')
+
     def test_v_aliases_yu_without_changing_nv_lv(self):
         core.sync(self.config)
         for keys, word in [('v', '雨'), ('van', '原'), ('ve', '月'), ('vn', '云'),

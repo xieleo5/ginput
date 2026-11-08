@@ -1,5 +1,6 @@
 """Grid layout and alpha compositing tests; run under Xvfb in CI."""
 import os
+import json
 from pathlib import Path
 import socket
 import tempfile
@@ -65,6 +66,17 @@ class PanelUITests(unittest.TestCase):
     def test_mouse_message_keeps_frame_identity(self):
         self.window.command('select',6)
         self.assertEqual(self.b.recv(128),b'select 1 6')
+
+    def test_feedback_acknowledges_only_a_saved_snapshot_without_changing_candidates(self):
+        original=self.window.state.copy()
+        self.b.send(json.dumps(dict(event='commit',window='test',preedit='ni hao',text='你好',candidates=[{'text':'你好','comment':''}],selected_index=0)).encode())
+        self.window.receive(None,0)
+        with patch.object(self.window,'feedback_notice') as notice:
+            self.b.send(json.dumps(dict(event='feedback',window='test',x=30,y=30)).encode())
+            self.window.receive(None,0)
+            self.assertIn('已记录反馈',notice.call_args.args[0])
+        self.assertEqual(self.window.state,original)
+        self.assertEqual(self.window.feedback.reports()[0]['input']['text'],'你好')
 
     def test_theme_opacity_loaded_from_local_config(self):
         with tempfile.TemporaryDirectory() as folder, patch.dict(os.environ,{'XDG_CONFIG_HOME':folder}):

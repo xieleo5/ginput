@@ -38,4 +38,8 @@ learning=data/'learning.py'
 learning_temp=learning.with_suffix('.py.new')
 shutil.copyfile(root/'ginput/platforms/linux/learning.py',learning_temp)
 learning_temp.replace(learning)
+feedback=data/'feedback.py'
+feedback_temp=feedback.with_suffix('.py.new')
+shutil.copyfile(root/'ginput/platforms/linux/feedback.py',feedback_temp)
+feedback_temp.replace(feedback)
 print('下拉候选插件已安装到用户目录。完成当前输入后重启 Fcitx 加载。')

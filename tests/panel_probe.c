@@ -18,7 +18,8 @@ FcitxInputState *FcitxInstanceGetInputState(FcitxInstance *i) { (void)i; return 
 FcitxInputContext *FcitxInstanceGetCurrentIC(FcitxInstance *i) { (void)i; return (FcitxInputContext *)&current; }
 FcitxCandidateWordList *FcitxInputStateGetCandidateList(FcitxInputState *i) { (void)i; return NULL; }
 FcitxMessages *FcitxInputStateGetPreedit(FcitxInputState *i) { (void)i; return NULL; }
-char *FcitxUIMessagesToCString(FcitxMessages *m) { (void)m; return strdup("ni hao"); }
+static const char *preedit="ni hao";
+char *FcitxUIMessagesToCString(FcitxMessages *m) { (void)m; return strdup(preedit); }
 int FcitxCandidateWordGetCurrentWindowSize(FcitxCandidateWordList *l) { (void)l; int n=total-engine_page*5; return n<5?n:5; }
 int FcitxCandidateWordGetListSize(FcitxCandidateWordList *l) { return FcitxCandidateWordGetCurrentWindowSize(l); }
 boolean FcitxCandidateWordHasPrev(FcitxCandidateWordList *l) { (void)l; return engine_page>0; }
@@ -59,7 +60,7 @@ int main(void) {
     int pair[2]; assert(!socketpair(AF_UNIX,SOCK_SEQPACKET,0,pair));
     Panel p={.fd=pair[0],.ready=true,.dirty=true}; active_panel=&p;
     /* Sensitive fields and other engines must never transmit key or commit data. */
-    char event[1024];
+    char event[4096];
     capacity=CAPACITY_PASSWORD;
     input_event(&p,"key","",'p',0);commit_filter(&p,"private");
     assert(recv(pair[1],event,sizeof(event),MSG_DONTWAIT)==-1 && errno==EAGAIN);
@@ -71,12 +72,31 @@ int main(void) {
     commit_filter(&p,"你好");
     size=recv(pair[1],event,sizeof(event)-1,MSG_DONTWAIT);assert(size>0);event[size]=0;
     assert(strstr(event,"你好") && strstr(event,"ni hao"));
+    assert(strstr(event,"\"candidates\":[") && strstr(event,"word04"));
+    total=0;
+    INPUT_RETURN_VALUE feedback_result=IRV_TO_PROCESS;
+    unsigned int feedback_state=FcitxKeyState_Ctrl|FcitxKeyState_Shift;
+    assert(key_filter(&p,FcitxKey_b,feedback_state,&feedback_result));
+    assert(feedback_result==IRV_DO_NOTHING);
+    assert(release_filter(&p,FcitxKey_b,feedback_state,&feedback_result));
+    size=recv(pair[1],event,sizeof(event)-1,MSG_DONTWAIT);assert(size>0);event[size]=0;
+    assert(strstr(event,"\"event\":\"feedback\""));
+    capacity=CAPACITY_PASSWORD;
+    assert(!key_filter(&p,FcitxKey_B,feedback_state,&feedback_result));
+    assert(recv(pair[1],event,sizeof(event),MSG_DONTWAIT)==-1 && errno==EAGAIN);
+    capacity=CAPACITY_NONE;total=47;
     press(&p,FcitxKey_comma); assert(engine_page==0 && !p.expanded);
     press(&p,FcitxKey_period); assert(engine_page==1 && p.count==5 && !p.expanded);
     press(&p,FcitxKey_comma); assert(engine_page==0 && !p.expanded);
     press(&p,FcitxKey_Down);
     assert(p.expanded && p.count==20 && p.pages==4 && engine_page==0);
     assert(!strcmp(p.words[19].text,"word19"));
+    while (recv(pair[1],event,sizeof(event),MSG_DONTWAIT)>0) {}
+    preedit="nihao"; /* Engine page movement can remove visual separators. */
+    commit_filter(&p,"word06");
+    size=recv(pair[1],event,sizeof(event)-1,MSG_DONTWAIT);assert(size>0);event[size]=0;
+    assert(strstr(event,"word19") && strstr(event,"\"selected_index\":6") && strstr(event,"\"expanded\":true"));
+    preedit="ni hao";
     press(&p,FcitxKey_period); assert(engine_page==4 && p.count==20 && p.expanded);
     press(&p,FcitxKey_period); assert(engine_page==8 && p.count==7);
     press(&p,FcitxKey_period); assert(engine_page==8 && p.count==7);

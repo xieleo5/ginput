@@ -21,6 +21,7 @@ PUBLIC_FILES = (
     'ginput/skin.py', 'ginput/platforms/__init__.py', 'ginput/platforms/macos.py',
     'ginput/platforms/linux/__init__.py', 'ginput/platforms/linux/desktop.py',
     'ginput/platforms/linux/learning.py', 'ginput/platforms/linux/panel_ui.py',
+    'ginput/platforms/linux/feedback.py',
     'ginput/platforms/linux/skin.py', 'ginput/rime/ginput.schema.yaml',
     'ginput/rime/ginput.lua', 'ginput/examples/words.example.tsv',
 )

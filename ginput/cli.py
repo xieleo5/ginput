@@ -39,6 +39,15 @@ def main(argv=None) -> int:
     learning.add_argument('action', choices=['enable', 'disable', 'status', 'clear-history'])
     learning.add_argument('--retention-days', type=int, default=7, help='原始历史保留天数；0 表示直到手动清除')
     learning.add_argument('--include-learned', action='store_true', help='清除历史时同时清除本工具的自动词表和相邻词统计；保留手工词库与 Rime userdb')
+    feedback=sub.add_parser('feedback',help='集中复核 Ctrl+Shift+B 标记的本地问题')
+    feedback_sub=feedback.add_subparsers(dest='feedback_action',required=True)
+    listing=feedback_sub.add_parser('list')
+    listing.add_argument('--status',choices=['open','resolved','all'],default='open')
+    listing.add_argument('--limit',type=int,default=100)
+    note=feedback_sub.add_parser('note')
+    note.add_argument('id');note.add_argument('--expected');note.add_argument('--note')
+    resolved=feedback_sub.add_parser('resolve');resolved.add_argument('id')
+    feedback_sub.add_parser('clear')
     skin = sub.add_parser('skin', help='生成或启用本机 Fcitx 皮肤')
     skin_sub = skin.add_subparsers(dest='skin_action', required=True)
     skin_build = skin_sub.add_parser('build')
@@ -63,8 +72,18 @@ def main(argv=None) -> int:
             from .platforms.macos import install
             print(json.dumps(install(args.config, args.base_dictionary.expanduser().resolve()), ensure_ascii=False, indent=2))
             return 0
-        if args.command in ('learning', 'skin', 'service') and host_platform() != 'linux':
+        if args.command in ('learning', 'skin', 'service', 'feedback') and host_platform() != 'linux':
             raise InputError('此功能属于 Linux Fcitx 适配器，macOS 请使用鼠须管原生候选框和 Rime 选词学习。')
+        if args.command=='feedback':
+            from .platforms.linux.feedback import FeedbackStore
+            store=FeedbackStore()
+            try:
+                if args.feedback_action=='list':print(json.dumps(store.reports(args.status,args.limit),ensure_ascii=False,indent=2))
+                elif args.feedback_action=='note':store.update(args.id,expected=args.expected,note=args.note);print('已补充反馈。')
+                elif args.feedback_action=='resolve':store.update(args.id,status='resolved');print('已标记为已处理。')
+                else:store.clear();print('已清除本地反馈。')
+            finally:store.close()
+            return 0
         if args.command == 'learning':
             from .learning import LearningStore, configure
             store = LearningStore()
@@ -111,6 +130,7 @@ def main(argv=None) -> int:
             checks = {config['deployer']: bool(shutil.which(config['deployer'])),
                       'pinyin_simp.dict.yaml': (Path(config['shared_data']) / 'pinyin_simp.dict.yaml').is_file(),
                       'default.yaml': (Path(config['shared_data']) / 'default.yaml').is_file()}
+            checks['OpenCC t2s data'] = any(all((root / name).is_file() for name in ('t2s.json', 'TSPhrases.ocd2', 'TSCharacters.ocd2')) for root in (Path(config['shared_data']) / 'opencc', Path('/usr/share/opencc')))
             checks['librime-plugin-lua'] = any(Path('/usr/lib').glob('*/rime-plugins/librime-lua.so')) or Path('/usr/lib/rime-plugins/librime-lua.so').is_file()
             if config['reload'] == 'fcitx4':
                 checks['fcitx-remote'] = bool(shutil.which('fcitx-remote'))
