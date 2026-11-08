@@ -109,6 +109,19 @@ function M.translator.func(input, seg, env)
   end
 end
 M.filter = {init=function() load_lexicon() end}
+local function rank_before(a,b)
+  if a.category~=b.category then return a.category<b.category end
+  if a.score~=b.score then return a.score>b.score end
+  -- Positive context preserves intentional recent choices. Deletion is only a
+  -- weak signal: it can add at most three positions, not demote a common word
+  -- behind every neutral candidate regardless of the engine's frequency order.
+  local positive_a,positive_b=math.max(0,a.context),math.max(0,b.context)
+  if positive_a~=positive_b then return positive_a>positive_b end
+  local position_a=a.order+3*math.max(0,-a.context)
+  local position_b=b.order+3*math.max(0,-b.context)
+  if position_a~=position_b then return position_a<position_b end
+  return a.order<b.order
+end
 local function context_scores()
   local runtime = os.getenv('XDG_RUNTIME_DIR') or ((os.getenv('HOME') or '') .. '/.cache')
   local active = io.open(runtime .. '/ginput/active-window', 'r')
@@ -175,12 +188,7 @@ function M.filter.func(translation, env)
     if ordinal<=96 then batch[#batch+1]=classify(candidate)
     else
       if batch then
-        table.sort(batch,function(a,b)
-          if a.category~=b.category then return a.category<b.category end
-          if a.score~=b.score then return a.score>b.score end
-          if a.context~=b.context then return a.context>b.context end
-          return a.order<b.order
-        end)
+        table.sort(batch,rank_before)
         for _, item in ipairs(batch) do yield(item.candidate) end
         batch=nil
       end
@@ -189,12 +197,7 @@ function M.filter.func(translation, env)
     end
   end
   if batch then
-    table.sort(batch,function(a,b)
-      if a.category~=b.category then return a.category<b.category end
-      if a.score~=b.score then return a.score>b.score end
-      if a.context~=b.context then return a.context>b.context end
-      return a.order<b.order
-    end)
+    table.sort(batch,rank_before)
     for _, item in ipairs(batch) do yield(item.candidate) end
   end
 end

@@ -220,6 +220,7 @@ class LearningStore:
             removed=min(amount,record['remaining']);record['remaining']-=removed;amount-=removed
             if removed and not record['deleted'] and now-record['at']<=10:
                 record['deleted']=True
+                record['deleted_at']=now
                 if record['code']:
                     self.db.execute('UPDATE terms SET deleted=deleted+1 WHERE text=? AND code=?',(record['text'],record['code']))
                     if record['prefix']:self.db.execute('UPDATE pairs SET weight=MAX(0,weight-1) WHERE prefix=? AND text=?',(record['prefix'],record['text']))
@@ -231,7 +232,10 @@ class LearningStore:
                 age=max(0,self.clock()-record['at'])
                 scores[record['text']]=max(scores.get(record['text'],0),.6*math.exp(-age/600))
             elif record['code'] and record['deleted']:
-                scores[record['text']]=-.6
+                # Deleting text also happens during ordinary editing. Keep the
+                # weak rejection hint brief; history and counts remain intact.
+                age=max(0,self.clock()-record.get('deleted_at',record['at']))
+                if age<60:scores[record['text']]=-.6*(1-age/60)
         if window['commits'] and window['commits'][-1]['remaining'] and not window['commits'][-1]['deleted']:
             prefix=window['commits'][-1]['text']
             for text,weight in self.db.execute('SELECT text,weight FROM pairs WHERE prefix=? AND weight>0 ORDER BY weight DESC LIMIT 64',(prefix,)):

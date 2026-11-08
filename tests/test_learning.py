@@ -53,6 +53,16 @@ class LearningTests(unittest.TestCase):
         self.enable();self.commit();self.key(0xff08,composing=True)
         self.assertEqual(self.store.status()['terms'],1)
 
+    def test_deletion_hint_fades_without_erasing_history_or_deletion_counts(self):
+        self.enable();self.commit('是','shi');self.key(0xff08)
+        self.assertIn('是\t-0.6000',(paths()[3]/'context.tsv').read_text())
+        self.now+=30;self.key(ord('s'),composing=True)
+        self.assertIn('是\t-0.3000',(paths()[3]/'context.tsv').read_text())
+        self.now+=30;self.key(ord('h'),composing=True)
+        self.assertNotIn('是\t',(paths()[3]/'context.tsv').read_text())
+        self.assertEqual(self.store.status()['events'],4)
+        self.assertEqual(self.store.db.execute('SELECT accepted,deleted FROM terms WHERE text=?',('是',)).fetchone(),(1,1))
+
     def test_select_all_delete_and_replacement_do_not_leave_context(self):
         self.enable();self.commit();self.commit('中国','zhong guo')
         self.key(ord('a'),state=4);self.key(0xffff)

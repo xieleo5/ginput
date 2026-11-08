@@ -178,6 +178,23 @@ class RimeIntegration(unittest.TestCase):
         (runtime/'context.tsv').write_text('one\t1\n是有\t1\n')
         self.assertEqual(self.candidates('shiyou')[0],'石油')
 
+    def test_deletion_hint_cannot_bury_common_full_spelling_below_rare_words(self):
+        core.sync(self.config)
+        baseline=self.candidates('shi')
+        self.assertEqual(baseline[0],'是')
+        runtime=self.folder/'runtime/ginput';runtime.mkdir(parents=True)
+        (runtime/'active-window').write_text('one\n')
+        for weight in (-.6,-1,-100):
+            with self.subTest(weight=weight):
+                (runtime/'context.tsv').write_text(f'one\t{int(time.time())}\n是\t{weight}\n')
+                choices=self.candidates('shi')
+                self.assertLessEqual(choices.index('是'),3)
+                self.assertEqual([w for w in choices if w!='是'],[w for w in baseline if w!='是'])
+        (runtime/'context.tsv').write_text(f'one\t{int(time.time())}\n是\t-0.6\n石\t0.6\n')
+        choices=self.candidates('shi')
+        self.assertEqual(choices[0],'石')
+        self.assertLess(choices.index('是'),5)
+
     def test_recompile_adds_new_word_and_removes_old_static_word(self):
         core.sync(self.config)
         Path(self.config['words']).write_text('示例测试项目\tshi li ce shi xiang mu\t100000\n')
