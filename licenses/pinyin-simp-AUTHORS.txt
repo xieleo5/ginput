@@ -1,0 +1,12 @@
+Upstream: https://github.com/rime/rime-pinyin-simp
+
+Gong Chen <chen.sst@gmail.com> (Apache License version 2.0):
+  pinyin_simp.schema.yaml
+
+Derived from Android Pinyin IME (Apache License version 2.0):
+  pinyin_simp.dict.yaml
+
+The macOS package includes a source copy of pinyin_simp.dict.yaml. During
+installation its table name is changed to ginput_base, with a modification
+notice, to avoid overwriting another installed schema's pinyin_simp table.
+No dictionary entries are changed.

@@ -131,7 +131,8 @@ end
 function M.filter.func(translation, env)
   local context=env.engine.context
   local raw=context.input
-  local scores=context_scores()
+  local scores={}
+  if env.engine.schema.config:get_bool('ginput/context_enabled') ~= false then scores=context_scores() end
   local batch, ordinal={},0
   local function classify(candidate)
     local full=candidate._end==#raw

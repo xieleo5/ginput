@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "guitar-input"
-version = "0.5.0"
-description = "Linux Pinyin input method with local dictionary management"
+version = "0.6.0"
+description = "Cross-platform Rime Pinyin input with local dictionary management"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "Guitar"}]

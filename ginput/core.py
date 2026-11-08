@@ -1,19 +1,16 @@
 """Validate, compile and publish only Guitar Input's own Rime files."""
 
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import tempfile
 import time
-import unicodedata
 
 PACKAGE = Path(__file__).resolve().parent
 ARTIFACTS = ("ginput.schema.yaml", "ginput.prism.bin", "ginput.table.bin", "ginput.reverse.bin")
@@ -21,47 +18,9 @@ SOURCES = ("ginput.schema.yaml", "ginput.dict.yaml", "ginput_personal.dict.yaml"
            "lua/ginput.lua", "ginput.lexicon.tsv", "rime.lua")
 LOADER_BEGIN = '-- BEGIN GINPUT MANAGED LOADER'
 LOADER_END = '-- END GINPUT MANAGED LOADER'
-PINYIN = re.compile(r"[a-z]+(?: [a-z]+)*\Z")
-
-
-class InputError(Exception):
-    """A user-actionable validation or deployment failure."""
-
-
-class Pending(InputError):
-    """Wait for the input method to become inactive before replacing files."""
-
-
-@dataclass(frozen=True)
-class Word:
-    text: str
-    pinyin: str
-    weight: int
-
-
-def parse_words(data: str) -> list[Word]:
-    words = []
-    seen = set()
-    for number, line in enumerate(data.lstrip('\ufeff').splitlines(), 1):
-        if not line.strip() or line.lstrip().startswith('#'):
-            continue
-        cols = line.split('\t')
-        if len(cols) != 3:
-            raise InputError(f"第 {number} 行：需要三列，用 Tab 分隔。")
-        text, pinyin, weight = (c.strip() for c in cols)
-        if not text or len(text) > 128 or any(unicodedata.category(c).startswith('C') for c in text):
-            raise InputError(f"第 {number} 行：词语须为 1–128 个字符，不能含控制字符。")
-        pinyin = ' '.join(pinyin.lower().replace('ü', 'v').replace('u:', 'v').split())
-        if not PINYIN.fullmatch(pinyin) or len(pinyin) > 512:
-            raise InputError(f"第 {number} 行：使用无声调拼音，音节用空格分隔，ü 可写 v。")
-        if not weight.isascii() or not weight.isdigit() or not 1 <= int(weight) <= 1_000_000:
-            raise InputError(f"第 {number} 行：权重须为 1–1000000 的整数。")
-        key = (text, pinyin)
-        if key in seen:
-            raise InputError(f"第 {number} 行：词语和拼音与前面的条目重复。")
-        seen.add(key)
-        words.append(Word(text, pinyin, int(weight)))
-    return words
+from .dictionary import Word, parse_words, lexicon
+from .errors import InputError, Pending
+from .platforms import host_platform, paths_for
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -86,20 +45,26 @@ def xdg(name: str, fallback: str) -> Path:
     return Path(os.environ.get(name, str(Path.home() / fallback))).expanduser().resolve()
 
 
-def config_path() -> Path:
-    return xdg('XDG_CONFIG_HOME', '.config') / 'ginput/config.json'
+def config_path(platform: str | None = None) -> Path:
+    return paths_for(platform)['config']
 
 
-def default_config() -> dict:
-    return {
+def default_config(platform: str | None = None) -> dict:
+    platform = platform or host_platform()
+    paths = paths_for(platform)
+    config = {
         'version': 1,
-        'words': str(xdg('XDG_DATA_HOME', '.local/share') / 'ginput/words.tsv'),
-        'rime_dir': str(xdg('XDG_CONFIG_HOME', '.config') / 'fcitx/rime'),
-        'shared_data': '/usr/share/rime-data',
-        'state_dir': str(xdg('XDG_STATE_HOME', '.local/state') / 'ginput'),
+        'platform': platform,
+        'words': str(paths['words']),
+        'rime_dir': str(paths['rime']),
+        'shared_data': str(paths['shared']),
+        'state_dir': str(paths['state']),
         'deployer': 'rime_deployer',
-        'reload': 'fcitx4',
+        'reload': 'fcitx4' if platform == 'linux' else 'manual',
     }
+    if platform == 'macos':
+        config['base_dictionary'] = str(paths['base'])
+    return config
 
 
 def load_config(path: Path) -> dict:
@@ -107,23 +72,31 @@ def load_config(path: Path) -> dict:
         config = json.loads(path.read_text())
     except (OSError, ValueError) as exc:
         raise InputError(f"不能读取配置 {path}；先运行 ginput init。") from exc
-    required = set(default_config())
+    required = {'version', 'words', 'rime_dir', 'shared_data', 'state_dir', 'deployer', 'reload'}
     if not isinstance(config, dict) or not required <= config.keys() or config['version'] != 1:
         raise InputError('配置格式不正确或版本不支持。')
     for key in ('words', 'rime_dir', 'shared_data', 'state_dir'):
         if not isinstance(config[key], str) or not Path(config[key]).is_absolute():
             raise InputError(f'配置 {key} 必须为绝对路径。')
-    if config['reload'] not in ('none', 'fcitx4'):
-        raise InputError('reload 仅支持 none 或 fcitx4。')
+    config.setdefault('platform', 'linux')  # v0.5 configs remain Linux configs.
+    if config['platform'] not in ('linux', 'macos'):
+        raise InputError('platform 仅支持 linux 或 macos。')
+    allowed = ('none', 'fcitx4') if config['platform'] == 'linux' else ('manual',)
+    if config['reload'] not in allowed:
+        raise InputError('当前平台不支持此 reload 设置；macOS 使用 manual。')
+    if config['platform'] == 'macos':
+        base = config.get('base_dictionary')
+        if not isinstance(base, str) or not Path(base).is_absolute():
+            raise InputError('macOS 配置 base_dictionary 必须为绝对路径。')
     if not isinstance(config['deployer'], str) or not config['deployer']:
         raise InputError('deployer 必须为程序名或可执行文件路径。')
     return config
 
 
-def initialize(path: Path) -> dict:
+def initialize(path: Path, platform: str | None = None) -> dict:
     if path.exists():
         return load_config(path)
-    config = default_config()
+    config = default_config(platform)
     words = Path(config['words'])
     words.parent.mkdir(parents=True, exist_ok=True)
     if not words.exists():
@@ -163,18 +136,6 @@ def fingerprint(config: dict, data: bytes) -> str:
     return digest.hexdigest()
 
 
-def lexicon(words: list[Word], base_dictionary: Path | None = None) -> bytes:
-    entries = {}
-    if base_dictionary:
-        for line in base_dictionary.read_text().splitlines():
-            parts = line.split('\t')
-            if len(parts) >= 3 and PINYIN.fullmatch(parts[1]) and parts[2].isdigit():
-                entries[parts[0], parts[1]] = int(parts[2])
-    for word in words:
-        entries[word.text, word.pinyin] = max(word.weight, entries.get((word.text, word.pinyin), 0))
-    return ''.join(f'{text}\t{code}\t{weight}\n' for (text, code), weight in sorted(entries.items())).encode()
-
-
 def merge_loader(existing: bytes, managed: bytes) -> bytes:
     text = existing.decode('utf-8')
     if LOADER_BEGIN in text or LOADER_END in text:
@@ -182,17 +143,20 @@ def merge_loader(existing: bytes, managed: bytes) -> bytes:
             raise InputError('rime.lua 中的 Guitar Input 配置段不完整，未修改文件。')
         start, end = text.index(LOADER_BEGIN), text.index(LOADER_END) + len(LOADER_END)
         if text[end:end+1] == '\n': end += 1
+        if start == 0 and text[end:end+1] == '\n': end += 1  # our separator
         text = text[:start] + text[end:]
-    return text.encode() + (b'\n' if text and not text.endswith('\n') else b'') + managed
+    # Lua requires a top-level return to remain the last statement. Prepend
+    # our independent assignments so an existing return-based loader stays valid.
+    return managed + (b'\n' if text else b'') + text.encode()
 
 
-def render_sources(words: list[Word], revision: str, base_dictionary: Path | None = None) -> dict[str, bytes]:
+def render_sources(words: list[Word], revision: str, base_dictionary: Path | None = None, *, base_table: str = 'pinyin_simp', context: bool = True) -> dict[str, bytes]:
     personal = '\n'.join(f'{w.text}\t{w.pinyin}\t{w.weight}' for w in words)
     return {
-        'ginput.schema.yaml': (PACKAGE / 'rime/ginput.schema.yaml').read_bytes(),
+        'ginput.schema.yaml': (PACKAGE / 'rime/ginput.schema.yaml').read_bytes() + (b'\nginput:\n  context_enabled: false\n' if not context else b''),
         'ginput.dict.yaml': (
             f'---\nname: ginput\nversion: "{revision}"\nsort: by_weight\n'
-            'use_preset_vocabulary: false\nimport_tables:\n  - pinyin_simp\n  - ginput_personal\n...\n'
+            f'use_preset_vocabulary: false\nimport_tables:\n  - {base_table}\n  - ginput_personal\n...\n'
         ).encode(),
         'ginput_personal.dict.yaml': (
             f'---\nname: ginput_personal\nversion: "{revision}"\nsort: by_weight\n...\n{personal}\n'
@@ -237,21 +201,15 @@ def locked(state: Path):
 
 
 def ensure_inactive(config: dict) -> None:
-    if config['reload'] == 'none':
+    if config['reload'] in ('none', 'manual'):
         return
-    try:
-        result = subprocess.run(['fcitx-remote'], capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise Pending('未连接到 Fcitx 4；稍后自动重试。') from exc
-    if result.returncode or result.stdout.strip() not in ('0', '1', '2'):
-        raise Pending('未连接到 Fcitx 4；稍后自动重试。')
-    if result.stdout.strip() == '2':
-        raise Pending('词库已保存；切到英文/关闭输入法后会自动更新，以免中断正在输入的内容。')
+    from .platforms.linux.desktop import ensure_inactive as check
+    check()
 
 
-def publish(stage: Path, target: Path, state: Path) -> None:
+def publish(stage: Path, target: Path, state: Path, *, source_only: bool = False) -> None:
     """Journal managed files; preserve unrelated code in the shared Lua loader."""
-    files = list(SOURCES) + [f'build/{name}' for name in ARTIFACTS]
+    files = list(SOURCES) + (['ginput_base.dict.yaml'] if source_only else [f'build/{name}' for name in ARTIFACTS])
     # Store bytes as hex: no unsafe paths, pickle, or arbitrary backup-file reads.
     previous = {}
     for name in files:
@@ -280,7 +238,8 @@ def recover(target: Path, state: Path) -> None:
     journal = json.loads(path.read_text())
     expected = set(SOURCES) | {f'build/{name}' for name in ARTIFACTS}
     legacy = expected - {'lua/ginput.lua', 'ginput.lexicon.tsv', 'rime.lua'}
-    if journal['target'] != str(target) or set(journal['files']) not in (expected, legacy):
+    macos = set(SOURCES) | {'ginput_base.dict.yaml'}
+    if journal['target'] != str(target) or set(journal['files']) not in (expected, legacy, macos):
         raise InputError('未完成的更新与当前目标不一致；保留恢复记录，停止覆盖。')
     for name, data in journal['files'].items():
         dest = target / name
@@ -299,6 +258,9 @@ def read_status(config: dict) -> dict:
 
 
 def sync(config: dict, force: bool = False) -> dict:
+    if config.get('platform') == 'macos':
+        from .platforms.macos import sync_sources
+        return sync_sources(config, force)
     state, target = Path(config['state_dir']), Path(config['rime_dir'])
     with locked(state):
         data, words = read_words(config)
@@ -348,6 +310,8 @@ class Debounce:
 
 
 def watch(path: Path, interval: float = 0.5) -> None:
+    if load_config(path).get('platform') == 'macos':
+        raise InputError('macOS 暂不自动重部署；编辑后运行 sync，再从鼠须管菜单选择重新部署。')
     debounce = Debounce()
     last_done, last_message = None, None
     retry_at = 0.0

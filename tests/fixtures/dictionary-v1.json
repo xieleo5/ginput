@@ -1,0 +1,10 @@
+{
+  "format": "ginput-tsv-v1",
+  "valid": [
+    {"source": "\ufeff# comment\n女儿\tNÜ er\t50\n", "words": [["女儿", "nv er", 50]]},
+    {"source": "行\txing\t1\n行\thang\t1000000", "words": [["行", "xing", 1], ["行", "hang", 1000000]]},
+    {"source": "绿\tlu:\t20", "words": [["绿", "lv", 20]]},
+    {"source": "# empty dictionary\n", "words": []}
+  ],
+  "invalid": ["你好 ni hao 1", "你好\tni3 hao\t10", "你好\tni hao\t0", "你好\tni hao\t1000001", "你好\tni hao\t10\n你好\tNI hao\t20", "\u0000\tni\t1"]
+}

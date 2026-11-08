@@ -1,7 +1,7 @@
 schema:
   schema_id: ginput
   name: Guitar Input · 拼音
-  version: '0.5.0'
+  version: '0.6.0'
   author: [Guitar]
   description: 本地个人词库、全拼简拼、常见换序与邻键容错、输入习惯学习。
 switches:
@@ -53,8 +53,10 @@ menu:
 punctuator:
   import_preset: default
 key_binder:
-  # Punctuation commits ASCII characters; PageUp/PageDown handle paging.
-  bindings: []
+  # Comma/period page candidates; without a menu they remain ASCII punctuation.
+  bindings:
+    - { when: has_menu, accept: comma, send: Page_Up }
+    - { when: has_menu, accept: period, send: Page_Down }
 recognizer:
   import_preset: default
   patterns:

@@ -68,9 +68,15 @@ class LearningTests(unittest.TestCase):
         self.assertEqual(self.store.windows['one']['text'],'')
 
     def test_deleting_ascii_punctuation_does_not_reject_previous_word(self):
-        self.enable();self.key(ord(','),composing=True);self.commit();self.key(0xff08)
+        self.enable();self.key(ord(';'),composing=True);self.commit();self.key(0xff08)
         self.assertEqual(self.store.status()['terms'],1)
         self.assertEqual(self.store.windows['one']['text'],'你好')
+
+    def test_paging_keys_do_not_create_a_punctuation_deletion_boundary(self):
+        self.enable();self.key(ord('.'),composing=True);self.key(ord(','),composing=True)
+        self.commit();self.key(0xff08)
+        self.assertEqual(self.store.windows['one']['text'],'你')
+        self.assertEqual(self.store.status()['terms'],0)
 
     def test_context_is_separate_per_window_and_expires(self):
         self.enable();self.commit(window='one');self.commit('中国','zhong guo',window='two')

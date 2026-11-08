@@ -136,8 +136,16 @@ class RimeIntegration(unittest.TestCase):
     def test_ascii_punctuation_alone_and_after_composition(self):
         core.sync(self.config)
         punctuation='!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'
-        for typed,expected in [(punctuation,punctuation)]+[('nihao'+mark,'你好'+mark) for mark in punctuation]:
+        for typed,expected in [(punctuation,punctuation),('nihao ,.', '你好,.')]+[('nihao'+mark,'你好'+mark) for mark in punctuation if mark not in ',.']:
             with self.subTest(typed=typed):
+                result=subprocess.run([str(self.probe),str(SHARED),self.config['rime_dir'],typed,'--type',expected],capture_output=True,text=True)
+                self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_comma_period_page_candidates_without_committing_punctuation(self):
+        core.sync(self.config)
+        for typed,index in [('ni, ',0),('ni. ',5),('ni.., ',5),('ni., ',0)]:
+            with self.subTest(typed=typed):
+                expected=self.candidates('ni')[index]
                 result=subprocess.run([str(self.probe),str(SHARED),self.config['rime_dir'],typed,'--type',expected],capture_output=True,text=True)
                 self.assertEqual(result.returncode,0,result.stdout+result.stderr)
 
@@ -184,3 +192,34 @@ class RimeIntegration(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+@unittest.skipUnless(AVAILABLE, 'requires real librime test dependencies')
+class SquirrelSourceIntegration(unittest.TestCase):
+    setUpClass = classmethod(RimeIntegration.setUpClass.__func__)
+    tearDownClass = classmethod(RimeIntegration.tearDownClass.__func__)
+    candidates = RimeIntegration.candidates
+    assert_commits = RimeIntegration.assert_commits
+    # Reuse only probe setup, not all Linux-specific watcher/context tests.
+    def setUp(self):
+        RimeIntegration.setUp(self)
+        self.config.update(platform='macos', reload='manual', base_dictionary=str(SHARED/'pinyin_simp.dict.yaml'))
+
+    def test_squirrel_source_deploy_and_input(self):
+        core.atomic_write(Path(self.config['rime_dir'])/'rime.lua', b'return {}\n')
+        result = core.sync(self.config)
+        self.assertEqual(result['status'], 'deployment_required')
+        target = Path(self.config['rime_dir'])
+        self.assertFalse((target/'build').exists())
+        core.atomic_write(target/'default.custom.yaml', b'patch:\n  schema_list:\n    - schema: ginput\n')
+        built = subprocess.run([DEPLOYER, '--build', str(target), str(SHARED), str(target/'build')], capture_output=True, text=True)
+        self.assertEqual(built.returncode, 0, built.stderr)
+        for keys, word in [('nihao','你好'),('nh','你好'),('vyan','语言'),('nihoa','你好'),('slsrf','示例输入法')]:
+            with self.subTest(keys=keys): self.assert_commits(keys, word)
+        result=subprocess.run([str(self.probe),str(SHARED),str(target),'nihao!','--type','你好!'],capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        # A stale Linux context bridge must not influence Mac ranking.
+        runtime=self.folder/'runtime/ginput';runtime.mkdir(parents=True)
+        (runtime/'active-window').write_text('one\n')
+        (runtime/'context.tsv').write_text(f'one\t{int(time.time())}\n是有\t1\n')
+        self.assertEqual(self.candidates('shiyou')[0], '石油')

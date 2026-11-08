@@ -1,0 +1,6 @@
+# Optional example only. Merge desired keys into your existing file; do not
+# overwrite existing patch settings. This affects Squirrel, not just ginput.
+patch:
+  style/candidate_list_layout: linear
+  style/text_orientation: horizontal
+  style/inline_preedit: true

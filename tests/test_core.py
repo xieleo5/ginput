@@ -79,7 +79,7 @@ class SyncTests(unittest.TestCase):
         with patch.object(core,'compile_dictionary',self.fake_compile):
             core.sync(self.config);core.sync(self.config,force=True)
         text=path.read_text()
-        self.assertTrue(text.startswith('other_filter = require("other").filter\n'))
+        self.assertIn('other_filter = require("other").filter\n', text)
         self.assertEqual(text.count(core.LOADER_BEGIN),1)
         self.assertIn('ginput_correction = require("ginput").translator',text)
 

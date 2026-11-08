@@ -11,51 +11,18 @@ from .core import (InputError, Pending, atomic_write, compile_dictionary, config
                    fingerprint, initialize, load_config, read_status, read_words, sync, watch, xdg)
 
 
-def service_unit(root: Path, config: Path) -> str:
-    # Invoke the package via its module directory. Quote systemd's own syntax,
-    # including percent specifiers and dollar environment expansions.
-    def quote(value):
-        return '"' + str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%').replace('$', '$$') + '"'
-    if any(c in str(root) + str(config) + sys.executable for c in '\n\r'):
-        raise InputError('服务路径不能包含换行符。')
-    command = ' '.join([quote(sys.executable), '-m', 'ginput', '--config', quote(config), 'watch'])
-    # WorkingDirectory takes a literal path, not ExecStart's quoted argv syntax.
-    return f'''[Unit]
-Description=Guitar Input local dictionary watcher
-After=graphical-session.target
-PartOf=graphical-session.target
-
-[Service]
-Type=simple
-WorkingDirectory={str(root).replace('%', '%%')}
-ExecStart={command}
-Restart=on-failure
-RestartSec=5
-UMask=0077
-
-[Install]
-WantedBy=default.target
-'''
-
-
-def service(config: Path, action: str) -> None:
-    unit = xdg('XDG_CONFIG_HOME', '.config') / 'systemd/user/ginput-watch.service'
-    if action == 'disable':
-        subprocess.run(['systemctl', '--user', 'disable', '--now', unit.name], check=True)
-        return
-    text = service_unit(Path(__file__).resolve().parents[1], config)
-    atomic_write(unit, text.encode())
-    subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
-    subprocess.run(['systemctl', '--user', 'enable', '--now', unit.name], check=True)
-    print('已启用词库监视：journalctl --user -u ginput-watch -f')
+# Backward-compatible export for existing service consumers.
+from .platforms.linux.desktop import service_unit, service
+from .platforms import host_platform
 
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog='ginput', description='Guitar Input · 个人拼音与本地词库')
     parser.add_argument('--version', action='version', version=__version__)
-    parser.add_argument('--config', type=Path, default=config_path())
+    parser.add_argument('--config', type=Path)
     sub = parser.add_subparsers(dest='command', required=True)
-    sub.add_parser('init', help='创建本机配置与个人词库，不修改输入法设置')
+    init = sub.add_parser('init', help='创建本机配置与个人词库，不修改输入法设置')
+    init.add_argument('--platform', choices=['linux', 'macos'])
     sub.add_parser('validate', help='检查词库格式')
     sub.add_parser('edit', help='使用默认文本编辑器打开个人词库')
     sub.add_parser('status', help='查看路径和上次更新状态')
@@ -83,9 +50,21 @@ def main(argv=None) -> int:
     skin_build.add_argument('--opacity',type=float,default=.22)
     skin_activate = skin_sub.add_parser('activate')
     skin_activate.add_argument('directory',type=Path)
+    mac = sub.add_parser('macos', help='鼠须管配置包安装（不安装鼠须管、不自动部署）')
+    mac_sub = mac.add_subparsers(dest='mac_action', required=True)
+    mac_install = mac_sub.add_parser('install')
+    mac_install.add_argument('--base-dictionary', type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.config is None:
+            args.config = config_path(args.platform if args.command == 'init' else None)
         args.config = args.config.expanduser().resolve()
+        if args.command == 'macos':
+            from .platforms.macos import install
+            print(json.dumps(install(args.config, args.base_dictionary.expanduser().resolve()), ensure_ascii=False, indent=2))
+            return 0
+        if args.command in ('learning', 'skin', 'service') and host_platform() != 'linux':
+            raise InputError('此功能属于 Linux Fcitx 适配器，macOS 请使用鼠须管原生候选框和 Rime 选词学习。')
         if args.command == 'learning':
             from .learning import LearningStore, configure
             store = LearningStore()
@@ -110,7 +89,7 @@ def main(argv=None) -> int:
                 print(f'皮肤配置已启用；备份：{backup}。输入完成后重载 Fcitx 生效。')
             return 0
         if args.command == 'init':
-            config = initialize(args.config)
+            config = initialize(args.config, args.platform)
             print(f"配置：{args.config}\n个人词库：{config['words']}\n尚未修改系统输入法；下一步运行 doctor。")
             return 0
         config = load_config(args.config)
@@ -118,11 +97,17 @@ def main(argv=None) -> int:
             _, words = read_words(config)
             print(f'格式检查通过：{len(words)} 条个人词条。')
         elif args.command == 'edit':
-            subprocess.run(['xdg-open', config['words']], check=True)
+            subprocess.run(['open' if config.get('platform') == 'macos' else 'xdg-open', config['words']], check=True)
         elif args.command == 'status':
             print(json.dumps({'config': str(args.config), 'words': config['words'],
                               'reload': config['reload'], 'last_sync': read_status(config)}, ensure_ascii=False, indent=2))
         elif args.command == 'doctor':
+            if config.get('platform') == 'macos':
+                from .platforms.macos import doctor
+                checks = doctor(config)
+                for name, ok in checks.items(): print(f"{'OK' if ok else 'MISSING'}  {name}")
+                print('Lua 与候选输入需在鼠须管重新部署后实测；这里只检查路径，不保证输入法已生效。')
+                return 0 if all(checks.values()) else 1
             checks = {config['deployer']: bool(shutil.which(config['deployer'])),
                       'pinyin_simp.dict.yaml': (Path(config['shared_data']) / 'pinyin_simp.dict.yaml').is_file(),
                       'default.yaml': (Path(config['shared_data']) / 'default.yaml').is_file()}
@@ -134,6 +119,8 @@ def main(argv=None) -> int:
                 print(f"{'OK' if ok else 'MISSING'}  {name}")
             return 0 if all(checks.values()) else 1
         elif args.command == 'build':
+            if config.get('platform') == 'macos':
+                raise InputError('macOS 使用 sync 生成源码，再由鼠须管重新部署；不复用 Linux 编译文件。')
             output = args.output.expanduser().resolve()
             if output.exists() and any(output.iterdir()):
                 raise InputError('编译输出目录必须为空，避免覆盖其他文件。')
@@ -141,13 +128,14 @@ def main(argv=None) -> int:
             compile_dictionary(config, words, fingerprint(config, data), output)
             print(f'编译验证通过：{output}')
         elif args.command == 'sync':
-            if args.no_reload:
+            if args.no_reload and config.get('platform') != 'macos':
                 config['reload'] = 'none'
             result = sync(config, args.force)
             print(json.dumps(result, ensure_ascii=False, indent=2))
         elif args.command == 'watch':
             watch(args.config)
         elif args.command == 'service':
+            if config.get('platform') != 'linux': raise InputError('macOS 暂无后台自动部署服务。')
             service(args.config, args.action)
     except Pending as exc:
         print(str(exc), file=sys.stderr)
