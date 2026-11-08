@@ -20,7 +20,7 @@ jobs:
       - name: Compile native candidate panel
         run: cc -std=gnu11 -Wall -Wextra -Werror -fPIC -shared -isystem /usr/include native/panel.c -lX11 -o /tmp/fcitx-ginput-panel.so
   macos-tooling:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
